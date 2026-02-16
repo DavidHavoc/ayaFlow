@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["ayaflow", "ayaflow-common", "xtask"]
+# ayaflow-ebpf is excluded: it targets bpfel-unknown-none and must be built
+# separately via `cargo xtask build-ebpf`.
+
+[workspace.package]
+version = "0.1.0"
+authors = ["David Havoc"]
+license = "MIT OR Apache-2.0"
+edition = "2026"
+repository = "https://github.com/DavidHavoc/ayaFlow"
+

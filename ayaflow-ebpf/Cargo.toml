@@ -1,0 +1,15 @@
+[package]
+name = "ayaflow-ebpf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya-ebpf = "0.1"
+aya-log-ebpf = "0.1"
+ayaflow-common = { path = "../ayaflow-common", default-features = false }
+network-types = "0.0.7"
+
+[[bin]]
+name = "ayaflow"
+path = "src/main.rs"

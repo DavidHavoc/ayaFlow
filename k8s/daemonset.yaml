@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ayaflow
+  labels:
+    app: ayaflow
+spec:
+  selector:
+    matchLabels:
+      app: ayaflow
+  template:
+    metadata:
+      labels:
+        app: ayaflow
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: ayaflow
+          image: ayaflow:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: false
+            capabilities:
+              add:
+                - BPF        # Load eBPF programs
+                - NET_ADMIN  # Attach TC classifier
+                - PERFMON    # Access perf events / ring buffers
+          args:
+            - "--interface"
+            - "eth0"
+            - "--quiet"
+          ports:
+            - containerPort: 3000
+              name: http
+              hostPort: 3000
+          volumeMounts:
+            - name: bpffs
+              mountPath: /sys/fs/bpf
+            - name: data
+              mountPath: /data
+          env:
+            - name: RUST_LOG
+              value: "info"
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+      volumes:
+        - name: bpffs
+          hostPath:
+            path: /sys/fs/bpf
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: /var/lib/ayaflow
+            type: DirectoryOrCreate

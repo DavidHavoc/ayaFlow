@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # Your existing service (Target)
+  my-web-app:
+    image: nginx:alpine
+    container_name: my-web-app
+    ports:
+      - "8080:80"
+
+  # LightShark-mini Sidecar
+  lightshark:
+    build: .
+    network_mode: "service:my-web-app" # This is the magic line
+    depends_on:
+      - my-web-app
+    # Since it shares the network stack, it can see localhost:80 traffic 
+    # and external traffic to my-web-app.
+    # Note: To access LightShark's API, you might need to route through the target container 
+    # or use host networking if applicable, but network_mode: service merges them.
+    # If the target container exposes ports, LightShark's port 3000 might clash if not careful,
+    # or if you want to reach LightShark, you might need to expose port 3000 on the *target* container
+    # or rely on internal network access from other monitoring tools.
+    # 
+    # BETTER APPROACH for sidecar visibility:
+    # If you want to access LightShark API from outside, but sniff my-web-app:
+    # Docker network_mode: service merges namespaces.
+    # You must map port 3000 in 'my-web-app' if you want to reach LightShark externally,
+    # OR use a reverse proxy in the same network.

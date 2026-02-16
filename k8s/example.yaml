@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-with-lightshark
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        # 1. Your Main Application
+        - name: my-api
+          image: nginx:alpine 
+          ports:
+            - containerPort: 80
+
+        # 2. LightShark Sidecar
+        - name: lightshark
+          image: lightshark-mini:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"] # Required for packet capture
+          # No "network_mode" needed! 
+          # In K8s, containers in the same Pod AUTOMATICALLY share network.
+          args:
+             - "--interface"
+             - "eth0" # eth0 is shared with my-api
+             - "--quiet"
+          ports:
+            - containerPort: 3000
+              name: lightshark-api

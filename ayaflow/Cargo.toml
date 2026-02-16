@@ -1,0 +1,26 @@
+[package]
+name = "ayaflow"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya = "0.13"
+aya-log = "0.2"
+ayaflow-common = { path = "../ayaflow-common", features = ["user"] }
+tokio = { version = "1.37", features = ["full"] }
+axum = { version = "0.7", features = ["ws"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+dashmap = "5.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tower-http = { version = "0.5", features = ["cors", "trace", "fs", "add-extension"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5", features = ["derive"] }
+serde_yaml = "0.9"
+ctrlc = "3.4"
+prometheus-client = "0.22"
+ipnet = "2"
+anyhow = "1"

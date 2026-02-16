@@ -1,0 +1,16 @@
+[package]
+name = "ayaflow-common"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+user = ["serde", "aya"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"], optional = true }
+aya = { version = "0.13", optional = true }
+
+[lib]
+path = "src/lib.rs"
