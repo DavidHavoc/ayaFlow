@@ -13,14 +13,26 @@ network-types = "0.0.7"
 name = "ayaflow"
 path = "src/main.rs"
 
-# eBPF programs require optimization for the kernel verifier to accept them.
-# Without this, function calls are not inlined and the verifier rejects the
-# program with "processed 0 insns".
+# eBPF programs MUST have all code in one section -- the kernel verifier
+# rejects programs with cross-section function calls (aya cannot resolve them
+# for classifier programs).  These flags ensure:
+# - opt-level=2       : enable inlining
+# - debug-assertions  : no panic checks in .text
+# - overflow-checks   : no overflow checks in .text
+# - lto=true          : cross-crate inlining via bpf-linker
+# - codegen-units=1   : single compilation unit (better inlining)
 [profile.dev]
 opt-level = 2
 debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+codegen-units = 1
 
 [profile.release]
 opt-level = 2
 debug = false
-
+debug-assertions = false
+overflow-checks = false
+lto = true
+codegen-units = 1
