@@ -13,3 +13,15 @@ network-types = "0.0.7"
 [[bin]]
 name = "ayaflow"
 path = "src/main.rs"
+
+# eBPF programs require optimization for the kernel verifier to accept them.
+# Without this, function calls are not inlined and the verifier rejects the
+# program with "processed 0 insns".
+[profile.dev]
+opt-level = 2
+debug = false
+
+[profile.release]
+opt-level = 2
+debug = false
+
