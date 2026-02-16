@@ -23,53 +23,67 @@ pub static _license: [u8; 4] = *b"GPL\0";
 #[map]
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
+/// TC classifier entry point.  All logic is kept in a single function to
+/// guarantee the compiler places everything in the same ELF section and the
+/// BPF verifier can process it without cross-section function call issues.
 #[classifier]
 pub fn ayaflow(ctx: TcContext) -> i32 {
-    match try_ayaflow(&ctx) {
-        Ok(ret) => ret,
-        Err(_) => TC_ACT_PIPE,
-    }
-}
+    // -- Ethernet ----------------------------------------------------------
+    let data = ctx.data();
+    let data_end = ctx.data_end();
 
-#[inline(always)]
-fn try_ayaflow(ctx: &TcContext) -> Result<i32, ()> {
-    // --- Ethernet ---
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| ())?;
-    let ether_type = unsafe { ptr::read_unaligned(ptr::addr_of!(ethhdr.ether_type)) };
+    let eth_end = data + EthHdr::LEN;
+    if eth_end > data_end {
+        return TC_ACT_PIPE;
+    }
+    let eth_hdr = data as *const EthHdr;
+    let ether_type = unsafe { ptr::read_unaligned(ptr::addr_of!((*eth_hdr).ether_type)) };
     if ether_type != EtherType::Ipv4 {
-        return Ok(TC_ACT_PIPE);
+        return TC_ACT_PIPE;
     }
 
-    // --- IPv4 ---
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| ())?;
-    let proto = unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.proto)) };
+    // -- IPv4 --------------------------------------------------------------
+    let ip_start = eth_end;
+    let ip_end = ip_start + Ipv4Hdr::LEN;
+    if ip_end > data_end {
+        return TC_ACT_PIPE;
+    }
+    let ip_hdr = ip_start as *const Ipv4Hdr;
+    let proto = unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).proto)) };
+    let src_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).src_addr)) });
+    let dst_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).dst_addr)) });
+    let pkt_len =
+        u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).tot_len)) }) as u32;
 
-    let src_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.src_addr)) });
-    let dst_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.dst_addr)) });
-    let pkt_len = u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.tot_len)) }) as u32;
-
-    let ip_hdr_len = EthHdr::LEN + Ipv4Hdr::LEN;
-
-    // --- Transport ---
+    // -- Transport ---------------------------------------------------------
+    let transport_start = ip_end;
     let (src_port, dst_port) = match proto {
         IpProto::Tcp => {
-            let tcphdr: TcpHdr = ctx.load(ip_hdr_len).map_err(|_| ())?;
+            let tcp_end = transport_start + TcpHdr::LEN;
+            if tcp_end > data_end {
+                return TC_ACT_PIPE;
+            }
+            let tcp_hdr = transport_start as *const TcpHdr;
             (
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(tcphdr.source)) }),
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(tcphdr.dest)) }),
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).source)) }),
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).dest)) }),
             )
         }
         IpProto::Udp => {
-            let udphdr: UdpHdr = ctx.load(ip_hdr_len).map_err(|_| ())?;
+            let udp_end = transport_start + UdpHdr::LEN;
+            if udp_end > data_end {
+                return TC_ACT_PIPE;
+            }
+            let udp_hdr = transport_start as *const UdpHdr;
             (
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(udphdr.source)) }),
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(udphdr.dest)) }),
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*udp_hdr).source)) }),
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*udp_hdr).dest)) }),
             )
         }
-        _ => return Ok(TC_ACT_PIPE),
+        _ => return TC_ACT_PIPE,
     };
 
-    // --- Emit event ---
+    // -- Emit event --------------------------------------------------------
     let event = PacketEvent {
         src_addr,
         dst_addr,
@@ -87,7 +101,7 @@ fn try_ayaflow(ctx: &TcContext) -> Result<i32, ()> {
         buf.submit(0);
     }
 
-    Ok(TC_ACT_PIPE)
+    TC_ACT_PIPE
 }
 
 #[panic_handler]
