@@ -7,7 +7,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use aya::maps::RingBuf;
 use aya::programs::{tc, SchedClassifier, TcAttachType};
-use aya::Ebpf;
+use aya::Bpf;
 
 use ayaflow_common::PacketEvent;
 
@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── eBPF setup ────────────────────────────────────────────────────
-    let mut bpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
+    let mut bpf = Bpf::load(aya::include_bytes_aligned!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"
     )))?;
@@ -119,14 +119,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── RingBuf Poller ────────────────────────────────────────────────
-    let events_map = bpf.take_map("EVENTS").unwrap();
-    let ring_buf = RingBuf::try_from(events_map)?;
+    let mut ring_buf = RingBuf::try_from(bpf.map_mut("EVENTS").unwrap())?;
     let tx_ring = tx.clone();
     let traffic_state_ring = traffic_state.clone();
-
-    tokio::spawn(async move {
-        poll_ring_buf(ring_buf, tx_ring, traffic_state_ring).await;
-    });
 
     // ── HTTP API ──────────────────────────────────────────────────────
     let app_state = Arc::new(api::AppState {
@@ -141,20 +136,16 @@ async fn main() -> anyhow::Result<()> {
     let listener =
         tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
     tracing::info!("Server running on http://0.0.0.0:{}", config.port);
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .await?;
 
-    Ok(())
-}
+    // Spawn the HTTP server so the main task can poll the ring buffer.
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+            .await
+            .unwrap();
+    });
 
-/// Continuously poll the eBPF RingBuf for PacketEvent entries, convert them
-/// to PacketMetadata, update the live TrafficState, and forward to the storage
-/// writer channel.
-async fn poll_ring_buf(
-    mut ring_buf: RingBuf<aya::maps::MapData>,
-    tx: mpsc::Sender<PacketMetadata>,
-    traffic_state: Arc<state::TrafficState>,
-) {
+    // Main loop: poll the eBPF RingBuf.  This runs in the main task
+    // because aya 0.12 map_mut returns a borrow tied to `bpf`.
     loop {
         while let Some(item) = ring_buf.next() {
             if item.len() < core::mem::size_of::<PacketEvent>() {
@@ -164,11 +155,12 @@ async fn poll_ring_buf(
                 unsafe { core::ptr::read_unaligned(item.as_ptr() as *const PacketEvent) };
             let meta = PacketMetadata::from_ebpf(&event);
 
-            traffic_state.update(&meta);
-            let _ = tx.send(meta).await;
+            traffic_state_ring.update(&meta);
+            let _ = tx_ring.send(meta).await;
         }
 
         // Yield briefly to avoid busy-spinning when the ring buffer is empty.
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
 }
+

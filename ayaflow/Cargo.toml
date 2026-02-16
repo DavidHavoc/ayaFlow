@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-aya = "0.13"
+aya = "0.12"
 ayaflow-common = { path = "../ayaflow-common", features = ["user"] }
 tokio = { version = "1.37", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
