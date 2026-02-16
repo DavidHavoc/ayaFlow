@@ -66,8 +66,7 @@ async fn main() -> anyhow::Result<()> {
 
     // If the clsact qdisc already exists (EEXIST), that is fine.
     if let Err(e) = tc::qdisc_add_clsact(iface) {
-        let io_err = e.downcast_ref::<std::io::Error>();
-        if io_err.map_or(true, |ie| ie.raw_os_error() != Some(17)) {
+        if e.raw_os_error() != Some(17) {
             return Err(e.into());
         }
         tracing::debug!("clsact qdisc already exists on {}, reusing", iface);
