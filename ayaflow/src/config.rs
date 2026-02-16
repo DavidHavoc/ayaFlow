@@ -66,7 +66,7 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn from_file(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file(path: &Path) -> anyhow::Result<Self> {
         let content = fs::read_to_string(path)?;
         let config: Config = serde_yaml::from_str(&content)?;
         Ok(config)

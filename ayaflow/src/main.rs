@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::net::Ipv4Addr;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -51,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     // ── eBPF setup ────────────────────────────────────────────────────
     let mut bpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../target/bpfel-unknown-none/debug/ayaflow"
+        "/../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"
     )))?;
 
     // Optional: forward eBPF log messages to tracing.
