@@ -117,5 +117,44 @@ xtask/              # Build orchestration (cargo xtask)
 k8s/                # Kubernetes DaemonSet manifest
 ```
 
+## Performance & Footprint
+
+Measured on a minimal VM (Ubuntu 24.04, 2 vCPU, 2 GB RAM):
+
+| Metric | Value |
+|--------|-------|
+| Userspace RSS (steady-state) | ~33 MB |
+| eBPF program (xlated) | 784 B |
+| eBPF program (JIT-compiled) | 576 B |
+| eBPF program memlock | 4 KB |
+| EVENTS ring buffer | 256 KB |
+| Ring buffer memlock | ~270 KB |
+| Memory growth over time | None observed (stable RSS) |
+
+The eBPF classifier is verified loaded via `bpftool`:
+
+```
+$ sudo bpftool prog show name ayaflow
+430: sched_cls  name ayaflow  tag 0dabf78b3d068075  gpl
+     loaded_at 2026-02-16T16:38:12+0100  uid 0
+     xlated 784B  jited 576B  memlock 4096B  map_ids 76
+```
+
+## Tested On
+
+- **OS**: Ubuntu 24.04 LTS (aarch64)
+- **Kernel**: 6.x with BTF support
+- **Hardware**: 2 vCPU, 2 GB RAM (Lima VM)
+- **Rust**: nightly toolchain + `bpf-linker`
+
 ## License
+
+This project is licensed under either of:
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT license](LICENSE-MIT)
+
+at your option.
+
+The eBPF kernel components (`ayaflow-ebpf`) are licensed under GPL to ensure compatibility with the Linux kernel verifier.
+
 
