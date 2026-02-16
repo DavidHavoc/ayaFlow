@@ -150,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
 /// to PacketMetadata, update the live TrafficState, and forward to the storage
 /// writer channel.
 async fn poll_ring_buf(
-    mut ring_buf: RingBuf<&mut aya::maps::MapData>,
+    mut ring_buf: RingBuf<aya::maps::MapData>,
     tx: mpsc::Sender<PacketMetadata>,
     traffic_state: Arc<state::TrafficState>,
 ) {
