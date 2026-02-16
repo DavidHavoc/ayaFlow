@@ -52,6 +52,14 @@ async fn main() -> anyhow::Result<()> {
         "/../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"
     )))?;
 
+    // Debug: list all programs and maps that aya discovered from the ELF.
+    for (name, _prog) in bpf.programs() {
+        eprintln!("[DEBUG] discovered program: {}", name);
+    }
+    for (name, map) in bpf.maps() {
+        eprintln!("[DEBUG] discovered map: {} (type {:?})", name, map.map_type());
+    }
+
     // Attach TC classifier to the target interface.
     let iface = config
         .interface
@@ -67,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let program: &mut SchedClassifier =
         bpf.program_mut("ayaflow").unwrap().try_into()?;
+    eprintln!("[DEBUG] about to load program 'ayaflow'");
     program.load()?;
     program.attach(iface, TcAttachType::Ingress)?;
     tracing::info!("eBPF TC classifier attached to {} (ingress)", iface);
