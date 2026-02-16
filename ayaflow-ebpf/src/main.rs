@@ -1,9 +1,10 @@
 #![no_std]
 #![no_main]
+#![allow(non_upper_case_globals)]
 
 use aya_ebpf::{
-    bindings::TC_ACT_PIPE,
-    macros::{classifier, map},
+    bindings::{__sk_buff, TC_ACT_PIPE},
+    macros::map,
     maps::RingBuf,
     programs::TcContext,
 };
@@ -25,13 +26,20 @@ static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
 /// TC classifier entry point.
 ///
-/// All logic is kept in a single function and struct writes are done
-/// field-by-field to avoid compiler-generated `memcpy` / `memset` calls.
-/// Those builtins land in the `.text` ELF section, creating cross-section
-/// relocations that aya 0.13.x cannot resolve for `classifier` sections
-/// (the verifier then sees 0 instructions).
-#[classifier]
-pub fn ayaflow(ctx: TcContext) -> i32 {
+/// We set `#[link_section = "classifier/ayaflow"]` manually instead of using
+/// the `#[classifier]` proc-macro.  aya-ebpf-macros 0.1.x generates a bare
+/// `classifier` section, but aya 0.13.x requires the `prefix/name` format
+/// to properly resolve map relocations.  Without the suffix, aya loads the
+/// program with 0 instructions and the kernel verifier rejects it.
+#[no_mangle]
+#[link_section = "classifier/ayaflow"]
+pub fn ayaflow(ctx: *mut __sk_buff) -> i32 {
+    let ctx = unsafe { TcContext::new(ctx) };
+    try_classify(&ctx)
+}
+
+#[inline(always)]
+fn try_classify(ctx: &TcContext) -> i32 {
     // -- Ethernet ----------------------------------------------------------
     let data = ctx.data();
     let data_end = ctx.data_end();
@@ -88,10 +96,6 @@ pub fn ayaflow(ctx: TcContext) -> i32 {
     };
 
     // -- Emit event --------------------------------------------------------
-    // Write each field individually to avoid a whole-struct `write_unaligned`
-    // which generates a `memcpy` call into the `.text` section.  Aya 0.13.x
-    // cannot resolve cross-section function-call relocations for `classifier`
-    // programs, causing the verifier to see 0 instructions.
     if let Some(mut buf) = EVENTS.reserve::<PacketEvent>(0) {
         let p = buf.as_mut_ptr() as *mut PacketEvent;
         unsafe {
