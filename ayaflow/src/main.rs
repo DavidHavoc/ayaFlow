@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("[DEBUG] discovered program: {}", name);
     }
     for (name, map) in bpf.maps() {
-        eprintln!("[DEBUG] discovered map: {} (type {:?})", name, map.map_type());
+        eprintln!("[DEBUG] discovered map: {}", name);
     }
 
     // Attach TC classifier to the target interface.
