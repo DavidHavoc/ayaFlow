@@ -7,9 +7,8 @@ use aya_ebpf::{
     maps::RingBuf,
     programs::TcContext,
 };
-use aya_log_ebpf::info;
 use ayaflow_common::PacketEvent;
-use core::mem;
+use core::ptr;
 use network_types::{
     eth::{EthHdr, EtherType},
     ip::{IpProto, Ipv4Hdr},
@@ -36,17 +35,18 @@ pub fn ayaflow(ctx: TcContext) -> i32 {
 fn try_ayaflow(ctx: &TcContext) -> Result<i32, ()> {
     // --- Ethernet ---
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| ())?;
-    if ethhdr.ether_type != EtherType::Ipv4 {
+    let ether_type = unsafe { ptr::read_unaligned(ptr::addr_of!(ethhdr.ether_type)) };
+    if ether_type != EtherType::Ipv4 {
         return Ok(TC_ACT_PIPE);
     }
 
     // --- IPv4 ---
     let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| ())?;
-    let proto = ipv4hdr.proto;
+    let proto = unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.proto)) };
 
-    let src_addr = u32::from_be(ipv4hdr.src_addr);
-    let dst_addr = u32::from_be(ipv4hdr.dst_addr);
-    let pkt_len = u16::from_be(ipv4hdr.tot_len) as u32;
+    let src_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.src_addr)) });
+    let dst_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.dst_addr)) });
+    let pkt_len = u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(ipv4hdr.tot_len)) }) as u32;
 
     let ip_hdr_len = EthHdr::LEN + Ipv4Hdr::LEN;
 
@@ -54,11 +54,17 @@ fn try_ayaflow(ctx: &TcContext) -> Result<i32, ()> {
     let (src_port, dst_port) = match proto {
         IpProto::Tcp => {
             let tcphdr: TcpHdr = ctx.load(ip_hdr_len).map_err(|_| ())?;
-            (u16::from_be(tcphdr.source), u16::from_be(tcphdr.dest))
+            (
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(tcphdr.source)) }),
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(tcphdr.dest)) }),
+            )
         }
         IpProto::Udp => {
             let udphdr: UdpHdr = ctx.load(ip_hdr_len).map_err(|_| ())?;
-            (u16::from_be(udphdr.source), u16::from_be(udphdr.dest))
+            (
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(udphdr.source)) }),
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!(udphdr.dest)) }),
+            )
         }
         _ => return Ok(TC_ACT_PIPE),
     };

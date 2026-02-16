@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["ayaflow", "ayaflow-common", "xtask"]
+exclude = ["ayaflow-ebpf"]
 # ayaflow-ebpf is excluded: it targets bpfel-unknown-none and must be built
 # separately via `cargo xtask build-ebpf`.
 
