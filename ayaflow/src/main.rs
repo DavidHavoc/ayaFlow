@@ -118,7 +118,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── RingBuf Poller ────────────────────────────────────────────────
-    let ring_buf = RingBuf::try_from(bpf.map_mut("EVENTS").unwrap())?;
+    let events_map = bpf.take_map("EVENTS").unwrap();
+    let ring_buf = RingBuf::try_from(events_map)?;
     let tx_ring = tx.clone();
     let traffic_state_ring = traffic_state.clone();
 
