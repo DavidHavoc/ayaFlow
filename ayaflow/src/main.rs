@@ -8,7 +8,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use aya::maps::RingBuf;
 use aya::programs::{tc, SchedClassifier, TcAttachType};
 use aya::Ebpf;
-use aya_log::EbpfLogger;
 
 use ayaflow_common::PacketEvent;
 
@@ -53,10 +52,6 @@ async fn main() -> anyhow::Result<()> {
         "/../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"
     )))?;
 
-    // Optional: forward eBPF log messages to tracing.
-    if let Err(e) = EbpfLogger::init(&mut bpf) {
-        tracing::warn!("Failed to init eBPF logger: {}", e);
-    }
 
     // Attach TC classifier to the target interface.
     let iface = config
