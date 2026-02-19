@@ -13,6 +13,7 @@ use ayaflow_common::PacketEvent;
 
 mod api;
 mod config;
+mod dns;
 mod state;
 mod storage;
 
@@ -119,6 +120,17 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // ── DNS Cache (optional) ──────────────────────────────────────────────
+    let dns_cache = if config.resolve_dns {
+        tracing::info!("Reverse DNS resolution enabled");
+        Some(Arc::new(dns::DnsCache::new(
+            Duration::from_secs(300),
+            Duration::from_secs(2),
+        )))
+    } else {
+        None
+    };
+
     // ── RingBuf Poller ────────────────────────────────────────────────
     let events_map = bpf.take_map("EVENTS").unwrap();
     let ring_buf = RingBuf::try_from(events_map)?;
@@ -126,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
     let traffic_state_ring = traffic_state.clone();
 
     tokio::spawn(async move {
-        poll_ring_buf(ring_buf, tx_ring, traffic_state_ring).await;
+        poll_ring_buf(ring_buf, tx_ring, traffic_state_ring, dns_cache).await;
     });
 
     // ── HTTP API ──────────────────────────────────────────────────────
@@ -155,6 +167,7 @@ async fn poll_ring_buf(
     mut ring_buf: RingBuf<aya::maps::MapData>,
     tx: mpsc::Sender<PacketMetadata>,
     traffic_state: Arc<state::TrafficState>,
+    dns_cache: Option<Arc<dns::DnsCache>>,
 ) {
     loop {
         while let Some(item) = ring_buf.next() {
@@ -163,7 +176,13 @@ async fn poll_ring_buf(
             }
             let event =
                 unsafe { core::ptr::read_unaligned(item.as_ptr() as *const PacketEvent) };
-            let meta = PacketMetadata::from_ebpf(&event);
+            let mut meta = PacketMetadata::from_ebpf(&event);
+
+            // Enrich with reverse DNS if enabled.
+            if let Some(ref cache) = dns_cache {
+                meta.src_hostname = cache.resolve(&meta.src_ip).await;
+                meta.dst_hostname = cache.resolve(&meta.dst_ip).await;
+            }
 
             traffic_state.update(&meta);
             let _ = tx.send(meta).await;

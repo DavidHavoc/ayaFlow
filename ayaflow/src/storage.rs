@@ -27,10 +27,18 @@ impl Storage {
                 src_port INTEGER,
                 dst_port INTEGER,
                 protocol TEXT,
-                length INTEGER
+                length INTEGER,
+                src_hostname TEXT,
+                dst_hostname TEXT
             )",
             [],
         )?;
+
+        // Migrate existing databases: add hostname columns if missing.
+        // ALTER TABLE ... ADD COLUMN is a no-op when the column already exists
+        // in SQLite >= 3.35, but older versions error. We ignore errors here.
+        let _ = conn.execute("ALTER TABLE packets ADD COLUMN src_hostname TEXT", []);
+        let _ = conn.execute("ALTER TABLE packets ADD COLUMN dst_hostname TEXT", []);
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_timestamp ON packets(timestamp)",
@@ -113,8 +121,8 @@ impl Storage {
 
         {
             let mut stmt = match tx.prepare(
-                "INSERT INTO packets (timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO packets (timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, src_hostname, dst_hostname)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             ) {
                 Ok(stmt) => stmt,
                 Err(e) => {
@@ -131,7 +139,9 @@ impl Storage {
                     packet.src_port,
                     packet.dst_port,
                     packet.protocol,
-                    packet.length
+                    packet.length,
+                    packet.src_hostname,
+                    packet.dst_hostname
                 ]) {
                     eprintln!("Failed to insert packet: {}", e);
                 }
@@ -157,8 +167,8 @@ impl Storage {
 
         {
             let mut stmt = match tx.prepare(
-                "INSERT INTO packets (timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO packets (timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, src_hostname, dst_hostname)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             ) {
                 Ok(stmt) => stmt,
                 Err(e) => {
@@ -175,7 +185,9 @@ impl Storage {
                     bucket.src_port,
                     bucket.dst_port,
                     bucket.protocol,
-                    bucket.total_bytes as i64
+                    bucket.total_bytes as i64,
+                    bucket.src_hostname,
+                    bucket.dst_hostname
                 ]) {
                     eprintln!("Failed to insert aggregated row: {}", e);
                 }
@@ -192,7 +204,7 @@ impl Storage {
     pub fn query_history(&self, limit: usize) -> Result<Vec<PacketMetadata>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length
+            "SELECT timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, src_hostname, dst_hostname
              FROM packets ORDER BY timestamp DESC LIMIT ?1",
         )?;
 
@@ -205,6 +217,8 @@ impl Storage {
                 dst_port: row.get(4)?,
                 protocol: row.get(5)?,
                 length: row.get(6)?,
+                src_hostname: row.get(7)?,
+                dst_hostname: row.get(8)?,
             })
         })?;
 

@@ -33,6 +33,10 @@ pub struct Config {
     #[serde(default)]
     pub aggregation_window_seconds: u64,
 
+    /// Enable reverse DNS resolution for IP addresses.
+    #[serde(default)]
+    pub resolve_dns: bool,
+
     /// List of CIDRs allowed to access the API (empty = allow all).
     #[serde(default)]
     pub allowed_ips: Vec<String>,
@@ -60,6 +64,7 @@ impl Default for Config {
             quiet: false,
             data_retention_seconds: None,
             aggregation_window_seconds: 0,
+            resolve_dns: false,
             allowed_ips: Vec::new(),
         }
     }
@@ -94,6 +99,9 @@ impl Config {
         }
         if cli.aggregation_window != 0 {
             self.aggregation_window_seconds = cli.aggregation_window;
+        }
+        if cli.resolve_dns {
+            self.resolve_dns = true;
         }
         if !cli.allowed_ips.is_empty() {
             self.allowed_ips = cli.allowed_ips.clone();
@@ -138,6 +146,10 @@ pub struct CliArgs {
     /// Aggregation window in seconds (0 = disabled, store raw events).
     #[arg(long, default_value_t = 0)]
     pub aggregation_window: u64,
+
+    /// Enable reverse DNS resolution for IP addresses.
+    #[arg(long)]
+    pub resolve_dns: bool,
 
     /// IP CIDRs allowed to access the API (e.g., 10.0.0.0/8). Repeat for multiple.
     #[arg(long)]

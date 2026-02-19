@@ -15,6 +15,12 @@ pub struct PacketMetadata {
     pub dst_port: u16,
     pub protocol: String,
     pub length: usize,
+    /// Reverse-DNS hostname for source IP (None when DNS resolution is disabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src_hostname: Option<String>,
+    /// Reverse-DNS hostname for destination IP (None when DNS resolution is disabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dst_hostname: Option<String>,
 }
 
 impl PacketMetadata {
@@ -39,6 +45,8 @@ impl PacketMetadata {
             dst_port: event.dst_port,
             protocol,
             length: event.pkt_len as usize,
+            src_hostname: None,
+            dst_hostname: None,
         }
     }
 }
@@ -74,6 +82,8 @@ pub struct AggregatedBucket {
     pub protocol: String,
     pub packet_count: u64,
     pub total_bytes: u64,
+    pub src_hostname: Option<String>,
+    pub dst_hostname: Option<String>,
 }
 
 impl AggregatedBucket {
@@ -87,6 +97,8 @@ impl AggregatedBucket {
             protocol: packet.protocol.clone(),
             packet_count: 1,
             total_bytes: packet.length as u64,
+            src_hostname: packet.src_hostname.clone(),
+            dst_hostname: packet.dst_hostname.clone(),
         }
     }
 
@@ -217,6 +229,8 @@ mod tests {
             dst_port: 1234,
             protocol: "TCP".into(),
             length: 100,
+            src_hostname: None,
+            dst_hostname: None,
         };
 
         state.update(&packet);
