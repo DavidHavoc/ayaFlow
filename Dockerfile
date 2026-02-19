@@ -9,17 +9,17 @@ WORKDIR /build
 COPY . .
 RUN cd ayaflow-ebpf && \
     cargo +nightly build \
-      --target bpfel-unknown-none \
-      -Z build-std=core \
-      --release
+    --target bpfel-unknown-none \
+    -Z build-std=core \
+    --release
 
 # Stage 2: Build the userspace agent.
 FROM rust:1.85 AS builder
 
 WORKDIR /build
 COPY . .
-COPY --from=ebpf-builder /build/target/bpfel-unknown-none/release/ayaflow \
-     /build/target/bpfel-unknown-none/debug/ayaflow
+COPY --from=ebpf-builder /build/ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow \
+    /build/target/bpfel-unknown-none/debug/ayaflow
 
 RUN cargo build --release -p ayaflow
 
