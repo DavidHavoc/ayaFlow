@@ -150,8 +150,9 @@ async fn main() -> anyhow::Result<()> {
         let payload_map = bpf.take_map("PAYLOAD_EVENTS").unwrap();
         let payload_ring_buf = RingBuf::try_from(payload_map)?;
         let cache_clone = cache.clone();
+        let traffic_state_l7 = traffic_state.clone();
         tokio::spawn(async move {
-            l7::poll_payload_ring_buf(payload_ring_buf, cache_clone).await;
+            l7::poll_payload_ring_buf(payload_ring_buf, cache_clone, traffic_state_l7).await;
         });
 
         // Spawn periodic cleanup of expired domain cache entries.

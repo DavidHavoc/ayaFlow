@@ -119,6 +119,10 @@ pub struct TrafficState {
     pub total_packets: AtomicU64,
     pub total_bytes: AtomicU64,
     pub active_connections: AtomicUsize,
+    /// Total L7 payload events received from eBPF (only when deep_inspect is on).
+    pub deep_inspect_packets: AtomicU64,
+    /// Total domains successfully resolved from DNS/TLS SNI.
+    pub domains_resolved: AtomicU64,
 }
 
 impl TrafficState {
@@ -128,6 +132,8 @@ impl TrafficState {
             total_packets: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             active_connections: AtomicUsize::new(0),
+            deep_inspect_packets: AtomicU64::new(0),
+            domains_resolved: AtomicU64::new(0),
         }
     }
 

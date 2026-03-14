@@ -32,6 +32,8 @@ struct Metrics {
     packets_total: Counter,
     bytes_total: Counter,
     active_connections: Gauge,
+    deep_inspect_packets_total: Counter,
+    domains_resolved_total: Counter,
 }
 
 impl Metrics {
@@ -40,6 +42,8 @@ impl Metrics {
         let packets_total = Counter::default();
         let bytes_total = Counter::default();
         let active_connections = Gauge::default();
+        let deep_inspect_packets_total = Counter::default();
+        let domains_resolved_total = Counter::default();
 
         registry.register(
             "ayaflow_packets_total",
@@ -56,12 +60,24 @@ impl Metrics {
             "Currently active connections",
             active_connections.clone(),
         );
+        registry.register(
+            "ayaflow_deep_inspect_packets_total",
+            "Total L7 payload events processed by deep inspection",
+            deep_inspect_packets_total.clone(),
+        );
+        registry.register(
+            "ayaflow_domains_resolved_total",
+            "Total domains resolved from DNS queries and TLS SNI",
+            domains_resolved_total.clone(),
+        );
 
         Self {
             registry,
             packets_total,
             bytes_total,
             active_connections,
+            deep_inspect_packets_total,
+            domains_resolved_total,
         }
     }
 }
@@ -236,6 +252,18 @@ async fn get_metrics(state: Arc<AppState>, metrics: Arc<Metrics>) -> impl IntoRe
         metrics.bytes_total.inc_by(total_b - current_b);
     }
     metrics.active_connections.set(active as i64);
+
+    // L7 deep inspection counters.
+    let deep_pkts = state.traffic.deep_inspect_packets.load(Ordering::Relaxed);
+    let current_deep = metrics.deep_inspect_packets_total.get();
+    if deep_pkts > current_deep {
+        metrics.deep_inspect_packets_total.inc_by(deep_pkts - current_deep);
+    }
+    let domains = state.traffic.domains_resolved.load(Ordering::Relaxed);
+    let current_domains = metrics.domains_resolved_total.get();
+    if domains > current_domains {
+        metrics.domains_resolved_total.inc_by(domains - current_domains);
+    }
 
     let mut buf = String::new();
     encode(&mut buf, &metrics.registry).unwrap();

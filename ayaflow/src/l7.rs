@@ -1,10 +1,12 @@
 use dashmap::DashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::sync::atomic::Ordering;
 use tokio::time::{Duration, Instant};
 
 use aya::maps::RingBuf;
 use ayaflow_common::{PayloadEvent, MAX_PAYLOAD_LEN};
+
+use crate::state::TrafficState;
 
 // ── DNS Parser ────────────────────────────────────────────────────────────────
 
@@ -266,9 +268,8 @@ impl DomainCache {
 pub async fn poll_payload_ring_buf(
     mut ring_buf: RingBuf<aya::maps::MapData>,
     domain_cache: Arc<DomainCache>,
+    traffic_state: Arc<TrafficState>,
 ) {
-    let mut resolved_count: u64 = 0;
-
     loop {
         while let Some(item) = ring_buf.next() {
             if item.len() < core::mem::size_of::<PayloadEvent>() {
@@ -276,6 +277,8 @@ pub async fn poll_payload_ring_buf(
             }
             let event =
                 unsafe { core::ptr::read_unaligned(item.as_ptr() as *const PayloadEvent) };
+
+            traffic_state.deep_inspect_packets.fetch_add(1, Ordering::Relaxed);
 
             let payload_len = (event.payload_len as usize).min(MAX_PAYLOAD_LEN);
             let payload = &event.payload[..payload_len];
@@ -286,16 +289,9 @@ pub async fn poll_payload_ring_buf(
             // DNS (UDP port 53).
             if event.protocol == 17 && (event.dst_port == 53 || event.src_port == 53) {
                 if let Some(domain) = parse_dns_query(payload) {
-                    // For DNS queries (dst_port 53): the client is asking about `domain`.
-                    // We cache it keyed by destination IP that will appear in subsequent
-                    // connections.  For responses (src_port 53): we could parse the
-                    // answer section for the resolved IP, but for now we cache by the
-                    // queried domain associated with the client IP.
                     tracing::debug!("DNS query: {} -> {}", src_ip, domain);
-                    // Cache: when we later see a TLS connection from src_ip, we can
-                    // match it.  We also cache by domain name for direct lookup.
                     domain_cache.insert(&format!("dns:{}", domain), domain.clone());
-                    resolved_count += 1;
+                    traffic_state.domains_resolved.fetch_add(1, Ordering::Relaxed);
                 }
             }
 
@@ -305,7 +301,7 @@ pub async fn poll_payload_ring_buf(
                     let key = format!("{}:{}", dst_ip, event.dst_port);
                     tracing::debug!("TLS SNI: {} -> {} ({})", src_ip, dst_ip, sni);
                     domain_cache.insert(&key, sni);
-                    resolved_count += 1;
+                    traffic_state.domains_resolved.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
