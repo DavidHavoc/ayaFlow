@@ -7,15 +7,15 @@ Built on the [Aya](https://aya-rs.dev/) eBPF framework.
 ## Architecture
 
 ```
-Kernel:  NIC --> TC Hook (eBPF) --> RingBuf
-                                      |
-Userspace:              Tokio Event Loop
-                       /       |       \
-                DashMap    SQLite     Axum HTTP
-              (live stats) (history)  (API + /metrics)
+Kernel:  NIC --> TC Hook (eBPF, ingress + egress) --> RingBuf
+                                                        |
+Userspace:                            Tokio Event Loop
+                                     /       |       \
+                              DashMap    SQLite     Axum HTTP
+                            (live stats) (history)  (API + /metrics)
 ```
 
-- **Kernel-side**: A TC (Traffic Control) classifier attached at ingress parses Ethernet/IPv4/TCP/UDP headers and pushes lightweight `PacketEvent` structs to a shared ring buffer.
+- **Kernel-side**: A TC (Traffic Control) classifier attached at both ingress and egress parses Ethernet/IPv4/TCP/UDP headers and pushes lightweight `PacketEvent` structs (with a direction tag) to a shared ring buffer.
 - **Userspace**: An async Tokio agent polls the ring buffer, maintains live connection state in a DashMap, persists events to SQLite, and exposes a REST API with Prometheus metrics.
 
 ## Features
@@ -25,7 +25,7 @@ Userspace:              Tokio Event Loop
 - **Real-time monitoring** -- Live dashboard via REST API + WebSocket streaming.
 - **Persistent history** -- SQLite storage with configurable data retention and aggregation.
 - **Deep L7 inspection** -- Optional TLS SNI and DNS query extraction for domain-level visibility into encrypted traffic.
-- **Prometheus /metrics** -- Native exporter for `ayaflow_packets_total`, `ayaflow_bytes_total`, `ayaflow_active_connections`.
+- **Prometheus /metrics** -- Native exporter for `ayaflow_packets_total`, `ayaflow_bytes_total`, `ayaflow_active_connections`, `ayaflow_domains_resolved_total`, `ayaflow_deep_inspect_packets_total`.
 - **IP allowlist** -- Restrict API/dashboard access by source CIDR.
 
 ## Prerequisites
@@ -130,7 +130,8 @@ Measured on a minimal VM (Ubuntu 24.04, 2 vCPU, 2 GB RAM):
 | eBPF program (JIT-compiled) | 576 B |
 | eBPF program memlock | 4 KB |
 | EVENTS ring buffer | 256 KB |
-| Ring buffer memlock | ~270 KB |
+| PAYLOAD_EVENTS ring buffer | 256 KB (only used when `--deep-inspect` is on) |
+| Ring buffer memlock | ~270 KB (540 KB with deep inspect) |
 | Memory growth over time | None observed (stable RSS) |
 
 The eBPF classifier is verified loaded via `bpftool`:

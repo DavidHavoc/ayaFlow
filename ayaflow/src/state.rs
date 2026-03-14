@@ -15,6 +15,8 @@ pub struct PacketMetadata {
     pub dst_port: u16,
     pub protocol: String,
     pub length: usize,
+    /// Packet direction: "ingress" or "egress".
+    pub direction: String,
     /// Reverse-DNS hostname for source IP (None when DNS resolution is disabled).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src_hostname: Option<String>,
@@ -40,6 +42,11 @@ impl PacketMetadata {
             17 => "UDP".to_string(),
             other => format!("IP({})", other),
         };
+        let direction = if event.direction == 0 {
+            "ingress".to_string()
+        } else {
+            "egress".to_string()
+        };
         Self {
             timestamp: chrono::Utc::now().timestamp_millis(),
             src_ip,
@@ -48,6 +55,7 @@ impl PacketMetadata {
             dst_port: event.dst_port,
             protocol,
             length: event.pkt_len as usize,
+            direction,
             src_hostname: None,
             dst_hostname: None,
             domain: None,
@@ -86,6 +94,7 @@ pub struct AggregatedBucket {
     pub protocol: String,
     pub packet_count: u64,
     pub total_bytes: u64,
+    pub direction: String,
     pub src_hostname: Option<String>,
     pub dst_hostname: Option<String>,
     pub domain: Option<String>,
@@ -102,6 +111,7 @@ impl AggregatedBucket {
             protocol: packet.protocol.clone(),
             packet_count: 1,
             total_bytes: packet.length as u64,
+            direction: packet.direction.clone(),
             src_hostname: packet.src_hostname.clone(),
             dst_hostname: packet.dst_hostname.clone(),
             domain: packet.domain.clone(),
@@ -198,7 +208,8 @@ mod tests {
             src_port: 12345,
             dst_port: 443,
             protocol: 6,
-            _pad: [0; 3],
+            direction: 0,
+            _pad: [0; 2],
             pkt_len: 1500,
         };
         let meta = PacketMetadata::from_ebpf(&event);
@@ -209,6 +220,7 @@ mod tests {
         assert_eq!(meta.dst_port, 443);
         assert_eq!(meta.protocol, "TCP");
         assert_eq!(meta.length, 1500);
+        assert_eq!(meta.direction, "ingress");
     }
 
     #[test]
@@ -219,7 +231,8 @@ mod tests {
             src_port: 53000,
             dst_port: 53,
             protocol: 17,
-            _pad: [0; 3],
+            direction: 1,
+            _pad: [0; 2],
             pkt_len: 64,
         };
         let meta = PacketMetadata::from_ebpf(&event);
@@ -228,6 +241,7 @@ mod tests {
         assert_eq!(meta.dst_ip, "8.8.8.8");
         assert_eq!(meta.protocol, "UDP");
         assert_eq!(meta.length, 64);
+        assert_eq!(meta.direction, "egress");
     }
 
     #[test]
@@ -241,6 +255,7 @@ mod tests {
             dst_port: 1234,
             protocol: "TCP".into(),
             length: 100,
+            direction: "ingress".into(),
             src_hostname: None,
             dst_hostname: None,
             domain: None,

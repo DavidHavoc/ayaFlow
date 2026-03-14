@@ -21,8 +21,10 @@ pub struct PacketEvent {
     pub dst_port: u16,
     /// IP protocol number: 6 = TCP, 17 = UDP.
     pub protocol: u8,
+    /// Packet direction: 0 = ingress, 1 = egress.
+    pub direction: u8,
     /// Padding to maintain alignment.
-    pub _pad: [u8; 3],
+    pub _pad: [u8; 2],
     /// Total packet length from the IP header.
     pub pkt_len: u32,
 }
@@ -51,8 +53,10 @@ pub struct PayloadEvent {
     pub dst_port: u16,
     /// IP protocol number: 6 = TCP, 17 = UDP.
     pub protocol: u8,
+    /// Packet direction: 0 = ingress, 1 = egress.
+    pub direction: u8,
     /// Padding to maintain alignment.
-    pub _pad: [u8; 3],
+    pub _pad: [u8; 2],
     /// Total packet length from the IP header.
     pub pkt_len: u32,
     /// Actual number of payload bytes copied (may be < MAX_PAYLOAD_LEN).

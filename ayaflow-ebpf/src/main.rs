@@ -45,12 +45,16 @@ static CONFIG: Array<u32> = Array::with_max_entries(1, 0);
 #[no_mangle]
 #[link_section = "classifier/ayaflow"]
 pub fn ayaflow(ctx: *mut __sk_buff) -> i32 {
+    // Determine direction before wrapping in TcContext.
+    // On TC ingress, ingress_ifindex is set to the interface index (non-zero).
+    // On TC egress, ingress_ifindex is 0.
+    let direction: u8 = if unsafe { (*ctx).ingress_ifindex } != 0 { 0 } else { 1 };
     let ctx = unsafe { TcContext::new(ctx) };
-    try_classify(&ctx)
+    try_classify(&ctx, direction)
 }
 
 #[inline(always)]
-fn try_classify(ctx: &TcContext) -> i32 {
+fn try_classify(ctx: &TcContext, direction: u8) -> i32 {
     // -- Ethernet ----------------------------------------------------------
     let data = ctx.data();
     let data_end = ctx.data_end();
@@ -121,6 +125,7 @@ fn try_classify(ctx: &TcContext) -> i32 {
             ptr::write(ptr::addr_of_mut!((*p).src_port), src_port);
             ptr::write(ptr::addr_of_mut!((*p).dst_port), dst_port);
             ptr::write(ptr::addr_of_mut!((*p).protocol), proto as u8);
+            ptr::write(ptr::addr_of_mut!((*p).direction), direction);
             ptr::write(ptr::addr_of_mut!((*p).pkt_len), pkt_len);
         }
         buf.submit(0);
@@ -134,7 +139,7 @@ fn try_classify(ctx: &TcContext) -> i32 {
     if wants_payload {
         if let Some(flag) = unsafe { CONFIG.get(0) } {
             if *flag == 1 {
-                emit_payload(ctx, src_addr, dst_addr, src_port, dst_port, proto as u8, pkt_len, payload_offset, data_end);
+                emit_payload(ctx, src_addr, dst_addr, src_port, dst_port, proto as u8, direction, pkt_len, payload_offset, data_end);
             }
         }
     }
@@ -153,6 +158,7 @@ fn emit_payload(
     src_port: u16,
     dst_port: u16,
     protocol: u8,
+    direction: u8,
     pkt_len: u32,
     payload_offset: usize,
     data_end: usize,
@@ -182,7 +188,8 @@ fn emit_payload(
             ptr::write(ptr::addr_of_mut!((*p).src_port), src_port);
             ptr::write(ptr::addr_of_mut!((*p).dst_port), dst_port);
             ptr::write(ptr::addr_of_mut!((*p).protocol), protocol);
-            ptr::write(ptr::addr_of_mut!((*p)._pad), [0u8; 3]);
+            ptr::write(ptr::addr_of_mut!((*p).direction), direction);
+            ptr::write(ptr::addr_of_mut!((*p)._pad), [0u8; 2]);
             ptr::write(ptr::addr_of_mut!((*p).pkt_len), pkt_len);
             ptr::write(ptr::addr_of_mut!((*p).payload_len), copy_len as u16);
             ptr::write(ptr::addr_of_mut!((*p)._pad2), [0u8; 2]);

@@ -13,7 +13,7 @@ overhead of a full-blown service mesh or CNI replacement.
 | Language | Rust (no GC) | Go | C++/Go | Go | C |
 | Kubernetes-native | DaemonSet | Full CNI | Operator | DaemonSet | Manual |
 | Prometheus metrics | Built-in | Built-in | Via adapter | Built-in | No |
-| L7 protocol parsing | No | Yes | Yes | Partial | Yes (with dissectors) |
+| L7 protocol parsing | DNS + TLS SNI | Yes | Yes | Partial | Yes (with dissectors) |
 | Network policy | No | Yes | No | No | No |
 | Requires CNI swap | **No** | Yes | No | No | No |
 
@@ -33,14 +33,12 @@ overhead of a full-blown service mesh or CNI replacement.
 
 ## When to use something else
 
-- **You need L7 protocol parsing** (HTTP path, gRPC method, DNS query).
-  Use Hubble or Pixie.
+- **You need full L7 protocol parsing** (HTTP request/response bodies, gRPC methods).
+  Use Hubble or Pixie. ayaFlow parses DNS queries and TLS SNI but not HTTP/gRPC.
 - **You need network policy enforcement** (allow/deny traffic between pods).
   Use Cilium.
 - **You need distributed request tracing** across services.
   Use Pixie or OpenTelemetry.
-- **You need egress monitoring** in addition to ingress.
-  ayaFlow currently attaches to ingress only (egress support is planned).
 
 ## Kubernetes Deployment
 

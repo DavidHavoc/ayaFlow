@@ -73,7 +73,8 @@ async fn main() -> anyhow::Result<()> {
 
     program.load()?;
     program.attach(iface, TcAttachType::Ingress)?;
-    tracing::info!("eBPF TC classifier attached to {} (ingress)", iface);
+    program.attach(iface, TcAttachType::Egress)?;
+    tracing::info!("eBPF TC classifier attached to {} (ingress + egress)", iface);
 
     // -- Write deep_inspect flag to eBPF CONFIG map ------------------------
     if config.deep_inspect {

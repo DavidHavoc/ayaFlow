@@ -105,6 +105,8 @@ ayaFlow accepts configuration through **CLI flags**, **environment variables**, 
 | `--aggregation-window` | `AYAFLOW_AGGREGATION_WINDOW` | Aggregate events into N-second windows | `0` (off) |
 | `--allowed-ips` | `AYAFLOW_ALLOWED_IPS` | CIDRs allowed to hit the API | All |
 | `-q, --quiet` | `AYAFLOW_QUIET` | Suppress non-error logs | `false` |
+| `--deep-inspect` | `AYAFLOW_DEEP_INSPECT` | Enable DNS + TLS SNI domain extraction | `false` |
+| `--resolve-dns` | `AYAFLOW_RESOLVE_DNS` | Enable reverse DNS resolution for IPs | `false` |
 | `-c, --config` | `AYAFLOW_CONFIG` | Path to YAML config file | None |
 
 ### Example YAML config
@@ -116,6 +118,8 @@ db_path: /data/traffic.db
 connection_timeout: 300
 data_retention_seconds: 86400   # 1 day
 aggregation_window_seconds: 60  # 1-minute buckets
+deep_inspect: true              # DNS + TLS SNI extraction
+resolve_dns: true               # Reverse DNS lookups
 allowed_ips:
   - "127.0.0.1/32"
   - "192.168.1.0/24"
