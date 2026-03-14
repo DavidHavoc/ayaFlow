@@ -37,6 +37,10 @@ pub struct Config {
     #[serde(default)]
     pub resolve_dns: bool,
 
+    /// Enable deep L7 inspection (DNS query + TLS SNI extraction).
+    #[serde(default)]
+    pub deep_inspect: bool,
+
     /// List of CIDRs allowed to access the API (empty = allow all).
     #[serde(default)]
     pub allowed_ips: Vec<String>,
@@ -65,6 +69,7 @@ impl Default for Config {
             data_retention_seconds: None,
             aggregation_window_seconds: 0,
             resolve_dns: false,
+            deep_inspect: false,
             allowed_ips: Vec::new(),
         }
     }
@@ -102,6 +107,9 @@ impl Config {
         }
         if cli.resolve_dns {
             self.resolve_dns = true;
+        }
+        if cli.deep_inspect {
+            self.deep_inspect = true;
         }
         if !cli.allowed_ips.is_empty() {
             self.allowed_ips = cli.allowed_ips.clone();
@@ -150,6 +158,10 @@ pub struct CliArgs {
     /// Enable reverse DNS resolution for IP addresses.
     #[arg(long)]
     pub resolve_dns: bool,
+
+    /// Enable deep packet inspection (extract DNS queries and TLS SNI).
+    #[arg(long)]
+    pub deep_inspect: bool,
 
     /// IP CIDRs allowed to access the API (e.g., 10.0.0.0/8). Repeat for multiple.
     #[arg(long)]

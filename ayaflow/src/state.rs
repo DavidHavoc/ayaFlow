@@ -21,6 +21,9 @@ pub struct PacketMetadata {
     /// Reverse-DNS hostname for destination IP (None when DNS resolution is disabled).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dst_hostname: Option<String>,
+    /// Domain name from DNS query or TLS SNI (None when deep_inspect is disabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
 }
 
 impl PacketMetadata {
@@ -47,6 +50,7 @@ impl PacketMetadata {
             length: event.pkt_len as usize,
             src_hostname: None,
             dst_hostname: None,
+            domain: None,
         }
     }
 }
@@ -84,6 +88,7 @@ pub struct AggregatedBucket {
     pub total_bytes: u64,
     pub src_hostname: Option<String>,
     pub dst_hostname: Option<String>,
+    pub domain: Option<String>,
 }
 
 impl AggregatedBucket {
@@ -99,6 +104,7 @@ impl AggregatedBucket {
             total_bytes: packet.length as u64,
             src_hostname: packet.src_hostname.clone(),
             dst_hostname: packet.dst_hostname.clone(),
+            domain: packet.domain.clone(),
         }
     }
 
@@ -231,6 +237,7 @@ mod tests {
             length: 100,
             src_hostname: None,
             dst_hostname: None,
+            domain: None,
         };
 
         state.update(&packet);

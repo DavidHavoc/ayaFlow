@@ -5,10 +5,10 @@
 use aya_ebpf::{
     bindings::{__sk_buff, TC_ACT_PIPE},
     macros::map,
-    maps::RingBuf,
+    maps::{Array, RingBuf},
     programs::TcContext,
 };
-use ayaflow_common::PacketEvent;
+use ayaflow_common::{PacketEvent, PayloadEvent, MAX_PAYLOAD_LEN};
 use core::ptr;
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -21,8 +21,19 @@ use network_types::{
 #[link_section = "license"]
 pub static _license: [u8; 4] = *b"GPL\0";
 
+/// Existing ring buffer for lightweight L3/L4 PacketEvent -- always active.
 #[map]
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+
+/// Second ring buffer for L7 payload events -- only written to when deep
+/// inspection is enabled via CONFIG[0].
+#[map]
+static PAYLOAD_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+
+/// Runtime configuration flag.  Index 0: deep_inspect (0 = off, 1 = on).
+/// Userspace writes this at program load time.
+#[map]
+static CONFIG: Array<u32> = Array::with_max_entries(1, 0);
 
 /// TC classifier entry point.
 ///
@@ -69,17 +80,22 @@ fn try_classify(ctx: &TcContext) -> i32 {
 
     // -- Transport ---------------------------------------------------------
     let transport_start = ip_end;
-    let (src_port, dst_port) = match proto {
+    let (src_port, dst_port, payload_offset) = match proto {
         IpProto::Tcp => {
             let tcp_end = transport_start + TcpHdr::LEN;
             if tcp_end > data_end {
                 return TC_ACT_PIPE;
             }
             let tcp_hdr = transport_start as *const TcpHdr;
-            (
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).source)) }),
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).dest)) }),
-            )
+            let sport =
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).source)) });
+            let dport =
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).dest)) });
+            // TCP data offset is in the upper 4 bits of the 13th byte (doff field),
+            // measured in 32-bit words.
+            let doff = unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).doff)) };
+            let tcp_header_len = ((doff >> 4) & 0x0F) as usize * 4;
+            (sport, dport, transport_start + tcp_header_len)
         }
         IpProto::Udp => {
             let udp_end = transport_start + UdpHdr::LEN;
@@ -87,15 +103,16 @@ fn try_classify(ctx: &TcContext) -> i32 {
                 return TC_ACT_PIPE;
             }
             let udp_hdr = transport_start as *const UdpHdr;
-            (
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*udp_hdr).source)) }),
-                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*udp_hdr).dest)) }),
-            )
+            let sport =
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*udp_hdr).source)) });
+            let dport =
+                u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*udp_hdr).dest)) });
+            (sport, dport, udp_end)
         }
         _ => return TC_ACT_PIPE,
     };
 
-    // -- Emit event --------------------------------------------------------
+    // -- Emit L3/L4 event (always) -----------------------------------------
     if let Some(mut buf) = EVENTS.reserve::<PacketEvent>(0) {
         let p = buf.as_mut_ptr() as *mut PacketEvent;
         unsafe {
@@ -109,7 +126,95 @@ fn try_classify(ctx: &TcContext) -> i32 {
         buf.submit(0);
     }
 
+    // -- Conditionally emit L7 payload event -------------------------------
+    // Only fire for DNS (port 53) or TLS (port 443) when deep_inspect is on.
+    let wants_payload = (proto == IpProto::Tcp && dst_port == 443)
+        || (proto == IpProto::Udp && (dst_port == 53 || src_port == 53));
+
+    if wants_payload {
+        if let Some(flag) = unsafe { CONFIG.get(0) } {
+            if *flag == 1 {
+                emit_payload(ctx, src_addr, dst_addr, src_port, dst_port, proto as u8, pkt_len, payload_offset, data_end);
+            }
+        }
+    }
+
     TC_ACT_PIPE
+}
+
+/// Copy up to MAX_PAYLOAD_LEN bytes of L7 payload into the PAYLOAD_EVENTS
+/// ring buffer.  All bounds are checked against `data_end` to satisfy the
+/// eBPF verifier.
+#[inline(always)]
+fn emit_payload(
+    _ctx: &TcContext,
+    src_addr: u32,
+    dst_addr: u32,
+    src_port: u16,
+    dst_port: u16,
+    protocol: u8,
+    pkt_len: u32,
+    payload_offset: usize,
+    data_end: usize,
+) {
+    // Verify there is at least 1 byte of payload.
+    if payload_offset >= data_end {
+        return;
+    }
+
+    let available = data_end - payload_offset;
+    let copy_len = if available > MAX_PAYLOAD_LEN {
+        MAX_PAYLOAD_LEN
+    } else {
+        available
+    };
+
+    // Bounds-check the range we are about to read.
+    if payload_offset + copy_len > data_end {
+        return;
+    }
+
+    if let Some(mut buf) = PAYLOAD_EVENTS.reserve::<PayloadEvent>(0) {
+        let p = buf.as_mut_ptr() as *mut PayloadEvent;
+        unsafe {
+            ptr::write(ptr::addr_of_mut!((*p).src_addr), src_addr);
+            ptr::write(ptr::addr_of_mut!((*p).dst_addr), dst_addr);
+            ptr::write(ptr::addr_of_mut!((*p).src_port), src_port);
+            ptr::write(ptr::addr_of_mut!((*p).dst_port), dst_port);
+            ptr::write(ptr::addr_of_mut!((*p).protocol), protocol);
+            ptr::write(ptr::addr_of_mut!((*p)._pad), [0u8; 3]);
+            ptr::write(ptr::addr_of_mut!((*p).pkt_len), pkt_len);
+            ptr::write(ptr::addr_of_mut!((*p).payload_len), copy_len as u16);
+            ptr::write(ptr::addr_of_mut!((*p)._pad2), [0u8; 2]);
+
+            // Zero the payload buffer first, then copy actual bytes.
+            // Using a bounded loop that the verifier can unroll/verify.
+            let payload_dst = ptr::addr_of_mut!((*p).payload) as *mut u8;
+            let payload_src = payload_offset as *const u8;
+
+            // Zero the full buffer.
+            let mut i: usize = 0;
+            while i < MAX_PAYLOAD_LEN {
+                *payload_dst.add(i) = 0;
+                i += 1;
+            }
+
+            // Copy the actual payload bytes.  The verifier needs the
+            // copy_len bound to be provably <= MAX_PAYLOAD_LEN.
+            i = 0;
+            while i < copy_len && i < MAX_PAYLOAD_LEN {
+                // Re-verify pointer is within packet bounds on each iteration
+                // to satisfy the eBPF verifier.
+                let src_ptr = payload_src.add(i);
+                if (src_ptr as usize) + 1 > data_end {
+                    break;
+                }
+                *payload_dst.add(i) = ptr::read_unaligned(src_ptr);
+                i += 1;
+            }
+        }
+        buf.submit(0);
+    }
 }
 
 #[panic_handler]

@@ -33,7 +33,7 @@ spec:
           args:
             - "--interface"
             - "eth0"
-            - "--quiet"
+            - "--quiet" # comment it out to see logs 
           ports:
             - containerPort: 3000
               name: http

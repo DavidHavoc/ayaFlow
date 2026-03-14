@@ -24,6 +24,7 @@ Userspace:              Tokio Event Loop
 - **Sidecarless DaemonSet** -- One pod per node instead of one per application pod.
 - **Real-time monitoring** -- Live dashboard via REST API + WebSocket streaming.
 - **Persistent history** -- SQLite storage with configurable data retention and aggregation.
+- **Deep L7 inspection** -- Optional TLS SNI and DNS query extraction for domain-level visibility into encrypted traffic.
 - **Prometheus /metrics** -- Native exporter for `ayaflow_packets_total`, `ayaflow_bytes_total`, `ayaflow_active_connections`.
 - **IP allowlist** -- Restrict API/dashboard access by source CIDR.
 
@@ -73,6 +74,7 @@ curl http://localhost:3000/metrics
 | `--allowed-ips` | CIDR(s) allowed to access the API | unrestricted |
 | `-c, --config` | Path to YAML config file | - |
 | `-q, --quiet` | Suppress non-error logs | `false` |
+| `--deep-inspect` | Enable DNS + TLS SNI domain extraction | `false` |
 
 ## Kubernetes Deployment
 
