@@ -15,9 +15,19 @@ Step-by-step guide for building and running ayaFlow as a Docker container.
 
 ---
 
-## 1 -- Build the Image
+## 1 -- Get the Image
 
-The repository includes a multi-stage `Dockerfile` that handles the entire build pipeline:
+**Option A: Pull from GitHub Packages (Recommended)**
+
+You can pull the pre-built Docker image instantly from the GitHub Container Registry. The image is built for OS/Arch `linux/amd64`.
+
+```bash
+docker pull ghcr.io/davidhavoc/ayaflow:latest
+```
+
+**Option B: Build locally**
+
+The repository includes a multi-stage `Dockerfile` that handles the entire build pipeline if you prefer to compile it yourself:
 
 ```bash
 docker build -t ayaflow:latest .

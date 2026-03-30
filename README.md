@@ -37,7 +37,15 @@ Userspace:                            Tokio Event Loop
 
 ## Quick Start
 
-### Build
+### Install via Docker Packages (Recommended)
+
+You can pull the pre-built Docker image directly from the GitHub Container Registry. The image is automatically built for OS/Arch `linux/amd64`.
+
+```bash
+docker pull ghcr.io/davidhavoc/ayaflow:latest
+```
+
+### Build from Source
 
 ```bash
 # Install bpf-linker (one-time)
