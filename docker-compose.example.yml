@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  my-web-app:
+    image: nginx:alpine
+    container_name: my-web-app
+    ports:
+      - "8080:80"
+
+  ayaflow:
+    build: .
+    network_mode: "service:my-web-app"
+    depends_on:
+      - my-web-app
