@@ -95,10 +95,9 @@ fn try_classify(ctx: &TcContext, direction: u8) -> i32 {
                 u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).source)) });
             let dport =
                 u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).dest)) });
-            // TCP data offset is in the upper 4 bits of the 13th byte (doff field),
-            // measured in 32-bit words.
-            let doff = unsafe { ptr::read_unaligned(ptr::addr_of!((*tcp_hdr).doff)) };
-            let tcp_header_len = ((doff >> 4) & 0x0F) as usize * 4;
+            // TCP data offset is stored in doff(), measured in 32-bit words.
+            let doff = unsafe { (*tcp_hdr).doff() };
+            let tcp_header_len = doff as usize * 4;
             (sport, dport, transport_start + tcp_header_len)
         }
         IpProto::Udp => {
