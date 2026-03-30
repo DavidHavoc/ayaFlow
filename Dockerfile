@@ -19,7 +19,7 @@ FROM rust:1.85 AS builder
 WORKDIR /build
 COPY . .
 COPY --from=ebpf-builder /build/ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow \
-    /build/target/bpfel-unknown-none/debug/ayaflow
+    /build/ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow
 
 RUN cargo build --release -p ayaflow
 
