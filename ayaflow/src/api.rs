@@ -46,12 +46,12 @@ impl Metrics {
         let domains_resolved_total = Counter::default();
 
         registry.register(
-            "ayaflow_packets_total",
+            "ayaflow_packets",
             "Total number of observed packets",
             packets_total.clone(),
         );
         registry.register(
-            "ayaflow_bytes_total",
+            "ayaflow_bytes",
             "Total bytes observed",
             bytes_total.clone(),
         );
@@ -61,12 +61,12 @@ impl Metrics {
             active_connections.clone(),
         );
         registry.register(
-            "ayaflow_deep_inspect_packets_total",
+            "ayaflow_deep_inspect_packets",
             "Total L7 payload events processed by deep inspection",
             deep_inspect_packets_total.clone(),
         );
         registry.register(
-            "ayaflow_domains_resolved_total",
+            "ayaflow_domains_resolved",
             "Total domains resolved from DNS queries and TLS SNI",
             domains_resolved_total.clone(),
         );

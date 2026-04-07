@@ -1,0 +1,73 @@
+# docker-compose.monitoring.yml
+#
+# Full monitoring stack: ayaFlow + Prometheus + Grafana
+#
+# Usage:
+#   docker compose -f docker-compose.monitoring.yml up -d
+#
+# Access points:
+#   - ayaFlow API:   http://localhost:3000
+#   - Prometheus:    http://localhost:9090
+#   - Grafana:       http://localhost:3001  (admin / admin)
+
+services:
+  # ── Traffic target (nginx) ─────────────────────────────────────────────────
+  web:
+    image: nginx:alpine
+    container_name: ayaflow-web
+    ports:
+      - "8080:80"
+      - "3000:3000"
+
+  # ── ayaFlow ────────────────────────────────────────────────────────────────
+  ayaflow:
+    image: ayaflow:latest
+    container_name: ayaflow
+    network_mode: "service:web"
+    depends_on:
+      - web
+    cap_add:
+      - BPF
+      - NET_ADMIN
+      - SYS_ADMIN
+    # Required for eBPF on some Docker runtimes
+    privileged: true
+    volumes:
+      - /sys/fs/bpf:/sys/fs/bpf
+    command: ["--interface", "eth0", "--deep-inspect"]
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ayaflow-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    depends_on:
+      - web   # ayaflow shares web's network, so web must be up first
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ayaflow-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:

@@ -9,15 +9,15 @@ Built on the [Aya](https://aya-rs.dev/) eBPF framework.
 ```mermaid
 flowchart TD
     subgraph Kernel["Kernel Space"]
-        NIC([NIC]) -->|TC Hook<br>Ingress + Egress| eBPF[eBPF Classifier]
-        eBPF -->|PacketEvent| RingBuf[(Ring Buffer)]
+        NIC(["NIC"]) -->|"TC Hook (Ingress + Egress)"| eBPF["eBPF Classifier"]
+        eBPF -->|"PacketEvent"| RingBuf[("Ring Buffer")]
     end
 
     subgraph User["User Space"]
-        RingBuf --> Tokio{Tokio Event Loop}
-        Tokio -->|Live Stats| DashMap[(DashMap)]
-        Tokio -->|History| SQLite[(SQLite)]
-        Tokio -->|API + Metrics| Axum([Axum HTTP])
+        RingBuf --> Tokio{"Tokio Event Loop"}
+        Tokio -->|"Live Stats"| DashMap[("DashMap")]
+        Tokio -->|"History"| SQLite[("SQLite")]
+        Tokio -->|"API + Metrics"| Axum(["Axum HTTP"])
     end
 ```
 
@@ -33,6 +33,14 @@ flowchart TD
 - **Deep L7 inspection** -- Optional TLS SNI and DNS query extraction for domain-level visibility into encrypted traffic.
 - **Prometheus /metrics** -- Native exporter for `ayaflow_packets_total`, `ayaflow_bytes_total`, `ayaflow_active_connections`, `ayaflow_domains_resolved_total`, `ayaflow_deep_inspect_packets_total`.
 - **IP allowlist** -- Restrict API/dashboard access by source CIDR.
+
+## Observability
+
+ayaFlow includes a fully configured Prometheus and Grafana monitoring stack for out-of-the-box observability. 
+
+Check out the `docker-compose.monitoring.example.yml` to spin up ayaFlow along with Prometheus (pre-configured to scrape the `/metrics` endpoint) and Grafana (auto-provisioned with the datasource and dashboard).
+
+![ayaFlow Grafana Dashboard](docs/grafana-dashboard.png)
 
 ## Prerequisites
 
