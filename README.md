@@ -6,13 +6,19 @@ Built on the [Aya](https://aya-rs.dev/) eBPF framework.
 
 ## Architecture
 
-```
-Kernel:  NIC --> TC Hook (eBPF, ingress + egress) --> RingBuf
-                                                        |
-Userspace:                            Tokio Event Loop
-                                     /       |       \
-                              DashMap    SQLite     Axum HTTP
-                            (live stats) (history)  (API + /metrics)
+```mermaid
+flowchart TD
+    subgraph Kernel["Kernel Space"]
+        NIC([NIC]) -->|TC Hook<br>Ingress + Egress| eBPF[eBPF Classifier]
+        eBPF -->|PacketEvent| RingBuf[(Ring Buffer)]
+    end
+
+    subgraph User["User Space"]
+        RingBuf --> Tokio{Tokio Event Loop}
+        Tokio -->|Live Stats| DashMap[(DashMap)]
+        Tokio -->|History| SQLite[(SQLite)]
+        Tokio -->|API + Metrics| Axum([Axum HTTP])
+    end
 ```
 
 - **Kernel-side**: A TC (Traffic Control) classifier attached at both ingress and egress parses Ethernet/IPv4/TCP/UDP headers and pushes lightweight `PacketEvent` structs (with a direction tag) to a shared ring buffer.
@@ -83,6 +89,7 @@ curl http://localhost:3000/metrics
 | `-c, --config` | Path to YAML config file | - |
 | `-q, --quiet` | Suppress non-error logs | `false` |
 | `--deep-inspect` | Enable DNS + TLS SNI domain extraction | `false` |
+| `--resolve-dns` | Enable reverse DNS resolution for IPs | `false` |
 
 ## Kubernetes Deployment
 
@@ -122,9 +129,9 @@ resources:
 ```
 ayaflow-common/    # Shared types (no_std, used by both kernel and userspace)
 ayaflow-ebpf/      # eBPF kernel program (TC classifier)
-ayaflow/            # Userspace agent (Aya loader + Tokio + Axum)
-xtask/              # Build orchestration (cargo xtask)
-k8s/                # Kubernetes DaemonSet manifest
+ayaflow/           # Userspace agent (Aya loader + Tokio + Axum)
+xtask/             # Build orchestration (cargo xtask)
+k8s/               # Kubernetes DaemonSet manifest
 ```
 
 ## Performance & Footprint
