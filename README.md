@@ -38,9 +38,7 @@ flowchart TD
 
 ayaFlow includes a fully configured Prometheus and Grafana monitoring stack for out-of-the-box observability. 
 
-Check out the `docker-compose.monitoring.example.yml` to spin up ayaFlow along with Prometheus (pre-configured to scrape the `/metrics` endpoint) and Grafana (auto-provisioned with the datasource and dashboard).
-
-![ayaFlow Grafana Dashboard](docs/grafana-dashboard.png)
+See `docker-compose.monitoring.example.yml` to spin up ayaFlow with Prometheus (pre-configured to scrape the `/metrics` endpoint) and Grafana (auto-provisioned with the datasource and dashboard).
 
 ## Prerequisites
 
@@ -175,12 +173,16 @@ $ sudo bpftool prog show name ayaflow
 
 ## License
 
-This project is licensed under either of:
+This project utilizes three different licenses depending on the component:
+
+### Userspace Components
+The userspace agent and common libraries (`ayaflow` and `ayaflow-common`) are dual-licensed under either of:
 - [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT license](LICENSE-MIT)
+- [MIT License](LICENSE-MIT)
 
 at your option.
 
-The eBPF kernel components (`ayaflow-ebpf`) are licensed under GPL to ensure compatibility with the Linux kernel verifier.
+### Kernel Components
+The eBPF kernel components (`ayaflow-ebpf`) are licensed strictly under the [GNU General Public License v2.0](LICENSE-GPL) (GPL) to ensure compatibility with the Linux kernel verifier.
 
 
