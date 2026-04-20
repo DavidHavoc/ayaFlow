@@ -19,7 +19,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.5", features = ["derive"] }
 serde_yaml = "0.9"
-ctrlc = "3.4"
 prometheus-client = "0.22"
 ipnet = "2"
 anyhow = "1"

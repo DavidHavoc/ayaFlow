@@ -7,7 +7,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use aya::maps::{Array, RingBuf};
 use aya::programs::{tc, SchedClassifier, TcAttachType};
-use aya::Ebpf;
 
 use ayaflow_common::PacketEvent;
 
@@ -180,6 +179,8 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         poll_ring_buf(ring_buf, tx_ring, traffic_state_ring, dns_cache, domain_cache).await;
     });
+    
+    drop(tx);
 
     // -- HTTP API -----------------------------------------------------------
     let app_state = Arc::new(api::AppState {
@@ -194,15 +195,37 @@ async fn main() -> anyhow::Result<()> {
     let listener =
         tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
     tracing::info!("Server running on http://0.0.0.0:{}", config.port);
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .await?;
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    );
+
+    // Race the server against a shutdown signal (Ctrl+C / SIGINT).
+    tokio::select! {
+        result = server => {
+            if let Err(e) = result {
+                tracing::error!("Server error: {}", e);
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Shutdown signal received, cleaning up...");
+        }
+    }
+
+    // -- Cleanup ---------------------------------------------------------
+    // Give in-flight storage writes a brief window to flush.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    // Drop the eBPF handle.  This detaches the TC classifier from the
+    // interface so no orphaned filter is left behind.
+    drop(bpf);
+    tracing::info!("TC filters detached from {}, shutdown complete", iface);
 
     Ok(())
 }
 
 /// Continuously poll the eBPF RingBuf for PacketEvent entries, convert them
-/// to PacketMetadata, update the live TrafficState, and forward to the storage
-/// writer channel.
+/// to PacketMetadata, update the live TrafficState, and forward to the storage writer channel.
 async fn poll_ring_buf(
     mut ring_buf: RingBuf<aya::maps::MapData>,
     tx: mpsc::Sender<PacketMetadata>,

@@ -6,23 +6,35 @@ Built on the [Aya](https://aya-rs.dev/) eBPF framework.
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    subgraph Kernel["Kernel Space"]
-        NIC(["NIC"]) -->|"TC Hook (Ingress + Egress)"| eBPF["eBPF Classifier"]
-        eBPF -->|"PacketEvent"| RingBuf[("Ring Buffer")]
-    end
-
-    subgraph User["User Space"]
-        RingBuf --> Tokio{"Tokio Event Loop"}
-        Tokio -->|"Live Stats"| DashMap[("DashMap")]
-        Tokio -->|"History"| SQLite[("SQLite")]
-        Tokio -->|"API + Metrics"| Axum(["Axum HTTP"])
-    end
+```
+                        KERNEL SPACE
+  +-------------------------------------------------------+
+  |                                                       |
+  |   NIC                                                 |
+  |    |                                                  |
+  |    +-- TC Hook (Ingress + Egress)                     |
+  |           |                                           |
+  |       eBPF Classifier                                 |
+  |           |                                           |
+  |       PacketEvent --> Ring Buffer                      |
+  |                          |                            |
+  +-------------------------------------------------------+
+                             |
+                        USER SPACE
+  +-------------------------------------------------------+
+  |                          |                            |
+  |                   Tokio Event Loop                    |
+  |                     /    |    \                       |
+  |                    /     |     \                      |
+  |            DashMap    SQLite    Axum HTTP              |
+  |          (live stats) (history) (API + metrics)       |
+  |                                                       |
+  +-------------------------------------------------------+
 ```
 
-- **Kernel-side**: A TC (Traffic Control) classifier attached at both ingress and egress parses Ethernet/IPv4/TCP/UDP headers and pushes lightweight `PacketEvent` structs (with a direction tag) to a shared ring buffer.
-- **Userspace**: An async Tokio agent polls the ring buffer, maintains live connection state in a DashMap, persists events to SQLite, and exposes a REST API with Prometheus metrics.
+**Kernel-side** -- A TC (Traffic Control) classifier attached at both ingress and egress parses Ethernet/IPv4/IPv6/TCP/UDP headers and pushes lightweight `PacketEvent` structs (with a direction tag) to a shared ring buffer.
+
+**Userspace** -- An async Tokio agent polls the ring buffer, maintains live connection state in a DashMap, persists events to SQLite, and exposes a REST API with Prometheus metrics.
 
 ## Features
 
