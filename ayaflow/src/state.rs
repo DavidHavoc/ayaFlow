@@ -153,20 +153,31 @@ impl TrafficState {
             packet.src_ip, packet.src_port, packet.dst_ip, packet.dst_port
         );
 
+        let is_egress = packet.direction == "egress";
+
         self.connections
             .entry(key)
             .and_modify(|stats| {
                 stats.packets_count += 1;
-                stats.bytes_sent += packet.length as u64;
+                if is_egress {
+                    stats.bytes_sent += packet.length as u64;
+                } else {
+                    stats.bytes_received += packet.length as u64;
+                }
                 stats.last_seen = Instant::now();
             })
             .or_insert_with(|| {
                 self.active_connections.fetch_add(1, Ordering::Relaxed);
-                ConnectionStats {
-                    bytes_sent: packet.length as u64,
+                let mut cs = ConnectionStats {
                     packets_count: 1,
                     ..Default::default()
+                };
+                if is_egress {
+                    cs.bytes_sent = packet.length as u64;
+                } else {
+                    cs.bytes_received = packet.length as u64;
                 }
+                cs
             });
 
         self.total_packets.fetch_add(1, Ordering::Relaxed);
