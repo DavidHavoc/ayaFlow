@@ -40,6 +40,7 @@ Built on the [Aya](https://aya-rs.dev/) eBPF framework.
 
 - **eBPF-native capture** -- No libpcap, no privileged sidecar. Hooks directly into the kernel's traffic control subsystem.
 - **Sidecarless DaemonSet** -- One pod per node instead of one per application pod.
+- **Broad Protocol Support** -- Captures and parses IPv4, IPv6, TCP, and UDP headers.
 - **Real-time monitoring** -- Live dashboard via REST API + WebSocket streaming.
 - **Persistent history** -- SQLite storage with configurable data retention and aggregation.
 - **Deep L7 inspection** -- Optional TLS SNI and DNS query extraction for domain-level visibility into encrypted traffic.
@@ -107,6 +108,7 @@ curl http://localhost:3000/metrics
 | `-c, --config` | Path to YAML config file | - |
 | `-q, --quiet` | Suppress non-error logs | `false` |
 | `--deep-inspect` | Enable DNS + TLS SNI domain extraction | `false` |
+| `--enable-ipv6` | Enable IPv6 packet capture | `false` (IPv4 only default) |
 | `--resolve-dns` | Enable reverse DNS resolution for IPs | `false` |
 
 ## Kubernetes Deployment
