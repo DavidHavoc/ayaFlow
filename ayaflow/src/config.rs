@@ -41,6 +41,10 @@ pub struct Config {
     #[serde(default)]
     pub deep_inspect: bool,
 
+    /// Enable IPv6 packet capture (default: off, IPv4 only).
+    #[serde(default)]
+    pub enable_ipv6: bool,
+
     /// List of CIDRs allowed to access the API (empty = allow all).
     #[serde(default)]
     pub allowed_ips: Vec<String>,
@@ -70,6 +74,7 @@ impl Default for Config {
             aggregation_window_seconds: 0,
             resolve_dns: false,
             deep_inspect: false,
+            enable_ipv6: false,
             allowed_ips: Vec::new(),
         }
     }
@@ -110,6 +115,9 @@ impl Config {
         }
         if cli.deep_inspect {
             self.deep_inspect = true;
+        }
+        if cli.enable_ipv6 {
+            self.enable_ipv6 = true;
         }
         if !cli.allowed_ips.is_empty() {
             self.allowed_ips = cli.allowed_ips.clone();
@@ -162,6 +170,10 @@ pub struct CliArgs {
     /// Enable deep packet inspection (extract DNS queries and TLS SNI).
     #[arg(long)]
     pub deep_inspect: bool,
+
+    /// Enable IPv6 packet capture (default: IPv4 only).
+    #[arg(long)]
+    pub enable_ipv6: bool,
 
     /// IP CIDRs allowed to access the API (e.g., 10.0.0.0/8). Repeat for multiple.
     #[arg(long)]

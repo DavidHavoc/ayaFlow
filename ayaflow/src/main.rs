@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use aya::Ebpf;
 use aya::maps::{Array, RingBuf};
 use aya::programs::{tc, SchedClassifier, TcAttachType};
 
@@ -75,14 +76,26 @@ async fn main() -> anyhow::Result<()> {
     program.attach(iface, TcAttachType::Egress)?;
     tracing::info!("eBPF TC classifier attached to {} (ingress + egress)", iface);
 
-    // -- Write deep_inspect flag to eBPF CONFIG map ------------------------
-    if config.deep_inspect {
+    // -- Write runtime flags to eBPF CONFIG map -----------------------------
+    {
         let mut config_map: Array<_, u32> =
             Array::try_from(bpf.map_mut("CONFIG").unwrap())?;
-        config_map.set(0, 1u32, 0)?;
-        tracing::info!("Deep L7 inspection enabled (DNS + TLS SNI)");
-    } else {
-        tracing::debug!("Deep L7 inspection disabled");
+
+        // CONFIG[0]: deep_inspect
+        if config.deep_inspect {
+            config_map.set(0, 1u32, 0)?;
+            tracing::info!("Deep L7 inspection enabled (DNS + TLS SNI)");
+        } else {
+            tracing::debug!("Deep L7 inspection disabled");
+        }
+
+        // CONFIG[1]: enable_ipv6
+        if config.enable_ipv6 {
+            config_map.set(1, 1u32, 0)?;
+            tracing::info!("IPv6 packet capture enabled");
+        } else {
+            tracing::debug!("IPv6 packet capture disabled (IPv4 only)");
+        }
     }
 
     // -- Channels ----------------------------------------------------------

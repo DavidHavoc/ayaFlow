@@ -8,11 +8,11 @@ use aya_ebpf::{
     maps::{Array, RingBuf},
     programs::TcContext,
 };
-use ayaflow_common::{PacketEvent, PayloadEvent, MAX_PAYLOAD_LEN};
+use ayaflow_common::{ipv4_mapped, PacketEvent, PayloadEvent, MAX_PAYLOAD_LEN};
 use core::ptr;
 use network_types::{
     eth::{EthHdr, EtherType},
-    ip::{IpProto, Ipv4Hdr},
+    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -30,10 +30,11 @@ static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 #[map]
 static PAYLOAD_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
-/// Runtime configuration flag.  Index 0: deep_inspect (0 = off, 1 = on).
-/// Userspace writes this at program load time.
+/// Runtime configuration flags (written by userspace at load time).
+///   Index 0: deep_inspect  (0 = off, 1 = on)
+///   Index 1: enable_ipv6   (0 = off, 1 = on)
 #[map]
-static CONFIG: Array<u32> = Array::with_max_entries(1, 0);
+static CONFIG: Array<u32> = Array::with_max_entries(2, 0);
 
 /// TC classifier entry point.
 ///
@@ -65,25 +66,80 @@ fn try_classify(ctx: &TcContext, direction: u8) -> i32 {
     }
     let eth_hdr = data as *const EthHdr;
     let ether_type = unsafe { ptr::read_unaligned(ptr::addr_of!((*eth_hdr).ether_type)) };
-    if ether_type != EtherType::Ipv4 {
-        return TC_ACT_PIPE;
-    }
 
-    // -- IPv4 --------------------------------------------------------------
-    let ip_start = eth_end;
+    match ether_type {
+        EtherType::Ipv4 => classify_ipv4(ctx, direction, eth_end, data_end),
+        EtherType::Ipv6 => {
+            // Check CONFIG[1] -- if IPv6 capture is disabled, skip.
+            if let Some(flag) = unsafe { CONFIG.get(1) } {
+                if *flag == 1 {
+                    return classify_ipv6(ctx, direction, eth_end, data_end);
+                }
+            }
+            TC_ACT_PIPE
+        }
+        _ => TC_ACT_PIPE,
+    }
+}
+
+/// Parse and emit events for IPv4 packets.
+#[inline(always)]
+fn classify_ipv4(ctx: &TcContext, direction: u8, ip_start: usize, data_end: usize) -> i32 {
     let ip_end = ip_start + Ipv4Hdr::LEN;
     if ip_end > data_end {
         return TC_ACT_PIPE;
     }
     let ip_hdr = ip_start as *const Ipv4Hdr;
     let proto = unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).proto)) };
-    let src_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).src_addr)) });
-    let dst_addr = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).dst_addr)) });
+    let src_addr_raw = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).src_addr)) });
+    let dst_addr_raw = u32::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).dst_addr)) });
     let pkt_len =
         u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).tot_len)) }) as u32;
 
-    // -- Transport ---------------------------------------------------------
-    let transport_start = ip_end;
+    let src_addr = ipv4_mapped(src_addr_raw);
+    let dst_addr = ipv4_mapped(dst_addr_raw);
+
+    classify_transport(ctx, direction, proto, src_addr, dst_addr, 4, pkt_len, ip_end, data_end)
+}
+
+/// Parse and emit events for IPv6 packets.
+#[inline(always)]
+fn classify_ipv6(ctx: &TcContext, direction: u8, ip_start: usize, data_end: usize) -> i32 {
+    let ip_end = ip_start + Ipv6Hdr::LEN;
+    if ip_end > data_end {
+        return TC_ACT_PIPE;
+    }
+    let ip_hdr = ip_start as *const Ipv6Hdr;
+    let proto = unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).next_hdr)) };
+    let pkt_len =
+        u16::from_be(unsafe { ptr::read_unaligned(ptr::addr_of!((*ip_hdr).payload_len)) }) as u32
+            + Ipv6Hdr::LEN as u32; // payload_len excludes the 40-byte header itself
+
+    // Read the raw 16-byte addresses.  in6_addr is a union wrapping [u8; 16].
+    let src_addr: [u8; 16] = unsafe {
+        ptr::read_unaligned(ptr::addr_of!((*ip_hdr).src_addr) as *const [u8; 16])
+    };
+    let dst_addr: [u8; 16] = unsafe {
+        ptr::read_unaligned(ptr::addr_of!((*ip_hdr).dst_addr) as *const [u8; 16])
+    };
+
+    classify_transport(ctx, direction, proto, src_addr, dst_addr, 6, pkt_len, ip_end, data_end)
+}
+
+/// Shared transport-layer (TCP/UDP) parsing and event emission for both IPv4
+/// and IPv6 flows.
+#[inline(always)]
+fn classify_transport(
+    ctx: &TcContext,
+    direction: u8,
+    proto: IpProto,
+    src_addr: [u8; 16],
+    dst_addr: [u8; 16],
+    addr_type: u8,
+    pkt_len: u32,
+    transport_start: usize,
+    data_end: usize,
+) -> i32 {
     let (src_port, dst_port, payload_offset) = match proto {
         IpProto::Tcp => {
             let tcp_end = transport_start + TcpHdr::LEN;
@@ -125,6 +181,8 @@ fn try_classify(ctx: &TcContext, direction: u8) -> i32 {
             ptr::write(ptr::addr_of_mut!((*p).dst_port), dst_port);
             ptr::write(ptr::addr_of_mut!((*p).protocol), proto as u8);
             ptr::write(ptr::addr_of_mut!((*p).direction), direction);
+            ptr::write(ptr::addr_of_mut!((*p).addr_type), addr_type);
+            ptr::write(ptr::addr_of_mut!((*p)._pad), [0u8; 1]);
             ptr::write(ptr::addr_of_mut!((*p).pkt_len), pkt_len);
         }
         buf.submit(0);
@@ -138,7 +196,7 @@ fn try_classify(ctx: &TcContext, direction: u8) -> i32 {
     if wants_payload {
         if let Some(flag) = unsafe { CONFIG.get(0) } {
             if *flag == 1 {
-                emit_payload(ctx, src_addr, dst_addr, src_port, dst_port, proto as u8, direction, pkt_len, payload_offset, data_end);
+                emit_payload(ctx, src_addr, dst_addr, addr_type, src_port, dst_port, proto as u8, direction, pkt_len, payload_offset, data_end);
             }
         }
     }
@@ -152,8 +210,9 @@ fn try_classify(ctx: &TcContext, direction: u8) -> i32 {
 #[inline(always)]
 fn emit_payload(
     _ctx: &TcContext,
-    src_addr: u32,
-    dst_addr: u32,
+    src_addr: [u8; 16],
+    dst_addr: [u8; 16],
+    addr_type: u8,
     src_port: u16,
     dst_port: u16,
     protocol: u8,
@@ -188,7 +247,8 @@ fn emit_payload(
             ptr::write(ptr::addr_of_mut!((*p).dst_port), dst_port);
             ptr::write(ptr::addr_of_mut!((*p).protocol), protocol);
             ptr::write(ptr::addr_of_mut!((*p).direction), direction);
-            ptr::write(ptr::addr_of_mut!((*p)._pad), [0u8; 2]);
+            ptr::write(ptr::addr_of_mut!((*p).addr_type), addr_type);
+            ptr::write(ptr::addr_of_mut!((*p)._pad), [0u8; 1]);
             ptr::write(ptr::addr_of_mut!((*p).pkt_len), pkt_len);
             ptr::write(ptr::addr_of_mut!((*p).payload_len), copy_len as u16);
             ptr::write(ptr::addr_of_mut!((*p)._pad2), [0u8; 2]);

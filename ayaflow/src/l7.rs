@@ -261,6 +261,18 @@ impl DomainCache {
     }
 }
 
+// ── Address Helpers ───────────────────────────────────────────────────────────
+
+/// Convert a 16-byte address + addr_type into a human-readable IP string.
+fn payload_addr_to_string(raw: &[u8; 16], addr_type: u8) -> String {
+    if addr_type == 4 {
+        // IPv4-mapped-IPv6: last 4 bytes hold the IPv4 octets.
+        std::net::Ipv4Addr::new(raw[12], raw[13], raw[14], raw[15]).to_string()
+    } else {
+        std::net::Ipv6Addr::from(*raw).to_string()
+    }
+}
+
 // ── Payload Ring Buffer Poller ────────────────────────────────────────────────
 
 /// Continuously poll the PAYLOAD_EVENTS eBPF RingBuf, parse DNS/TLS payloads,
@@ -283,8 +295,8 @@ pub async fn poll_payload_ring_buf(
             let payload_len = (event.payload_len as usize).min(MAX_PAYLOAD_LEN);
             let payload = &event.payload[..payload_len];
 
-            let src_ip = std::net::Ipv4Addr::from(event.src_addr).to_string();
-            let dst_ip = std::net::Ipv4Addr::from(event.dst_addr).to_string();
+            let src_ip = payload_addr_to_string(&event.src_addr, event.addr_type);
+            let dst_ip = payload_addr_to_string(&event.dst_addr, event.addr_type);
 
             // DNS (UDP port 53).
             if event.protocol == 17 && (event.dst_port == 53 || event.src_port == 53) {

@@ -1,0 +1,44 @@
+name: Release Binaries
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-upload:
+    name: Build and Upload Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: ayaflow-local:${{ matrix.arch }}
+          cache-from: type=gha
+
+      - name: Extract Binary
+        run: |
+          docker create --name extract ayaflow-local:${{ matrix.arch }}
+          docker cp extract:/usr/local/bin/ayaflow ayaflow-linux-${{ matrix.arch }}
+          docker rm extract
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ayaflow-linux-${{ matrix.arch }}

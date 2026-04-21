@@ -1,6 +1,6 @@
 use dashmap::DashMap;
 use serde::Serialize;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tokio::time::Instant;
 
@@ -28,15 +28,25 @@ pub struct PacketMetadata {
     pub domain: Option<String>,
 }
 
+/// Convert a 16-byte address + addr_type into a human-readable IP string.
+fn addr_to_string(raw: &[u8; 16], addr_type: u8) -> String {
+    if addr_type == 4 {
+        // IPv4-mapped-IPv6: last 4 bytes hold the IPv4 octets.
+        Ipv4Addr::new(raw[12], raw[13], raw[14], raw[15]).to_string()
+    } else {
+        Ipv6Addr::from(*raw).to_string()
+    }
+}
+
 impl PacketMetadata {
     /// Convert a kernel-side PacketEvent into a userspace PacketMetadata.
     ///
-    /// IP addresses are converted from u32 (network byte order, already
-    /// converted to host order in the eBPF program) to dotted-quad strings.
+    /// IP addresses are converted from the 16-byte wire format (IPv4-mapped
+    /// or raw IPv6) to canonical string representations.
     /// The timestamp is assigned here in userspace.
     pub fn from_ebpf(event: &PacketEvent) -> Self {
-        let src_ip = Ipv4Addr::from(event.src_addr).to_string();
-        let dst_ip = Ipv4Addr::from(event.dst_addr).to_string();
+        let src_ip = addr_to_string(&event.src_addr, event.addr_type);
+        let dst_ip = addr_to_string(&event.dst_addr, event.addr_type);
         let protocol = match event.protocol {
             6 => "TCP".to_string(),
             17 => "UDP".to_string(),
@@ -210,17 +220,19 @@ impl TrafficState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ayaflow_common::ipv4_mapped;
 
     #[test]
     fn test_from_ebpf_tcp() {
         let event = PacketEvent {
-            src_addr: u32::from_be_bytes([10, 0, 0, 1]),
-            dst_addr: u32::from_be_bytes([192, 168, 1, 100]),
+            src_addr: ipv4_mapped(u32::from_be_bytes([10, 0, 0, 1])),
+            dst_addr: ipv4_mapped(u32::from_be_bytes([192, 168, 1, 100])),
             src_port: 12345,
             dst_port: 443,
             protocol: 6,
             direction: 0,
-            _pad: [0; 2],
+            addr_type: 4,
+            _pad: [0; 1],
             pkt_len: 1500,
         };
         let meta = PacketMetadata::from_ebpf(&event);
@@ -237,13 +249,14 @@ mod tests {
     #[test]
     fn test_from_ebpf_udp() {
         let event = PacketEvent {
-            src_addr: u32::from_be_bytes([172, 16, 0, 1]),
-            dst_addr: u32::from_be_bytes([8, 8, 8, 8]),
+            src_addr: ipv4_mapped(u32::from_be_bytes([172, 16, 0, 1])),
+            dst_addr: ipv4_mapped(u32::from_be_bytes([8, 8, 8, 8])),
             src_port: 53000,
             dst_port: 53,
             protocol: 17,
             direction: 1,
-            _pad: [0; 2],
+            addr_type: 4,
+            _pad: [0; 1],
             pkt_len: 64,
         };
         let meta = PacketMetadata::from_ebpf(&event);
@@ -253,6 +266,31 @@ mod tests {
         assert_eq!(meta.protocol, "UDP");
         assert_eq!(meta.length, 64);
         assert_eq!(meta.direction, "egress");
+    }
+
+    #[test]
+    fn test_from_ebpf_ipv6() {
+        // 2001:db8::1 and 2001:db8::2
+        let src: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let dst: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        let event = PacketEvent {
+            src_addr: src,
+            dst_addr: dst,
+            src_port: 8080,
+            dst_port: 80,
+            protocol: 6,
+            direction: 0,
+            addr_type: 6,
+            _pad: [0; 1],
+            pkt_len: 500,
+        };
+        let meta = PacketMetadata::from_ebpf(&event);
+
+        assert_eq!(meta.src_ip, "2001:db8::1");
+        assert_eq!(meta.dst_ip, "2001:db8::2");
+        assert_eq!(meta.protocol, "TCP");
+        assert_eq!(meta.length, 500);
+        assert_eq!(meta.direction, "ingress");
     }
 
     #[test]

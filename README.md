@@ -7,29 +7,29 @@ Built on the [Aya](https://aya-rs.dev/) eBPF framework.
 ## Architecture
 
 ```
-                        KERNEL SPACE
-  +-------------------------------------------------------+
-  |                                                       |
-  |   NIC                                                 |
-  |    |                                                  |
-  |    +-- TC Hook (Ingress + Egress)                     |
-  |           |                                           |
-  |       eBPF Classifier                                 |
-  |           |                                           |
-  |       PacketEvent --> Ring Buffer                      |
-  |                          |                            |
-  +-------------------------------------------------------+
-                             |
-                        USER SPACE
-  +-------------------------------------------------------+
-  |                          |                            |
-  |                   Tokio Event Loop                    |
-  |                     /    |    \                       |
-  |                    /     |     \                      |
-  |            DashMap    SQLite    Axum HTTP              |
-  |          (live stats) (history) (API + metrics)       |
-  |                                                       |
-  +-------------------------------------------------------+
+                                KERNEL SPACE
+          +-------------------------------------------------------+
+          |                                                       |
+          |   NIC                                                 |
+          |    |                                                  |
+          |    +-- TC Hook (Ingress + Egress)                     |
+          |           |                                           |
+          |       eBPF Classifier                                 |
+          |           |                                           |
+          |       PacketEvent --> Ring Buffer                     |
+          |                          |                            |
+          +-------------------------------------------------------+
+                                    |
+                                USER SPACE
+          +-------------------------------------------------------+
+          |                          |                            |
+          |                   Tokio Event Loop                    |
+          |                     /    |    \                       |
+          |                    /     |     \                      |
+          |            DashMap    SQLite    Axum HTTP             |
+          |          (live stats) (history) (API + metrics)       |
+          |                                                       |
+          +-------------------------------------------------------+
 ```
 
 **Kernel-side** -- A TC (Traffic Control) classifier attached at both ingress and egress parses Ethernet/IPv4/IPv6/TCP/UDP headers and pushes lightweight `PacketEvent` structs (with a direction tag) to a shared ring buffer.
