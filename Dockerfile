@@ -1,5 +1,5 @@
 # Stage 1: Build the eBPF kernel program (requires nightly + bpf-linker).
-FROM rust:1.85 AS ebpf-builder
+FROM --platform=$BUILDPLATFORM rust:1.85 AS ebpf-builder
 
 RUN rustup install nightly && \
     rustup component add rust-src --toolchain nightly && \
