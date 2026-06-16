@@ -1,174 +1,136 @@
-# How to Use ayaFlow -- Local
+# How to Use ayaFlow Locally
 
-Step-by-step guide for building and running ayaFlow directly on a Linux host.
+This guide covers the two supported contributor paths:
 
----
+- Host-safe development on macOS or Linux
+- Full eBPF build and runtime on Linux
 
-## Prerequisites
+## 1. Host-Safe Workflow
 
-| Requirement | Details |
-|---|---|
-| **OS** | Linux kernel >= 5.8 with BTF support (`CONFIG_DEBUG_INFO_BTF=y`) |
-| **Rust** | Stable **and** Nightly toolchains installed |
-| **bpf-linker** | `cargo +nightly install bpf-linker` |
-| **Capabilities** | `CAP_BPF`, `CAP_NET_ADMIN`, `CAP_PERFMON` (or root) |
-
-Verify BTF support before anything else:
-```bash
-ls /sys/kernel/btf/vmlinux
-```
-If the file does not exist, your kernel was not compiled with BTF. You will need a different kernel or a distribution that ships BTF-enabled kernels (Ubuntu 22.04+, Fedora 36+, etc.).
-
----
-
-## 1 -- Install Toolchains
+Use this on macOS or any machine where you want to work on the API, storage, config, and parser logic without loading eBPF programs.
 
 ```bash
-# Install Rust via rustup (if not already present)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Add the nightly toolchain
-rustup install nightly
-
-# Install bpf-linker on nightly
-cargo +nightly install bpf-linker
-```
-
----
-
-## 2 -- Build
-
-The project uses a Cargo Workspace orchestrated by `xtask`.
-
-```bash
-# Clone the repo
 git clone https://github.com/DavidHavoc/ayaFlow.git
 cd ayaFlow
 
-# Build everything (eBPF kernel program + userspace agent)
+cargo xtask check-host
+cargo test -p ayaflow-common
+cargo test -p ayaflow
+cargo xtask build-user
+```
+
+`cargo test -p ayaflow` is expected to work on non-Linux hosts now because the eBPF loader is compiled only on Linux.
+
+## 2. Full Linux Workflow
+
+### Requirements
+
+| Requirement | Details |
+|---|---|
+| OS | Linux kernel >= 5.8 with BTF support |
+| Toolchains | Stable Rust plus nightly |
+| eBPF linker | `cargo +nightly install bpf-linker` |
+| Privileges | root, or `CAP_BPF`, `CAP_NET_ADMIN`, and `CAP_PERFMON` |
+
+Verify BTF support:
+
+```bash
+ls /sys/kernel/btf/vmlinux
+```
+
+### Build
+
+```bash
+rustup install nightly
+rustup component add rust-src --toolchain nightly
+cargo +nightly install bpf-linker
+
 cargo xtask build
 ```
 
-This single command:
-1. Compiles the eBPF program (`ayaflow-ebpf`) with the nightly toolchain targeting `bpfel-unknown-none`.
-2. Embeds the resulting object into the userspace binary (`ayaflow`).
-
----
-
-## 3 -- Run
-
-ayaFlow must run with elevated privileges to load eBPF programs and attach to the network interface.
+### Run
 
 ```bash
-sudo ./target/debug/ayaflow --interface eth0
+sudo ./target/debug/ayaflow --db-path /tmp/traffic.db
 ```
 
-Replace `eth0` with the interface you want to monitor. To list available interfaces:
+If you omit `--interface`, ayaFlow auto-detects the default route interface from `/proc/net/route`. Override it explicitly only when you want a different device:
+
 ```bash
-ip link show
+sudo ./target/debug/ayaflow --interface ens5 --deep-inspect --db-path /tmp/traffic.db
 ```
 
----
+### Verify
 
-## 4 -- Verify
-
-Once running, confirm the agent is healthy:
 ```bash
-# Health check
 curl http://localhost:3000/api/health
-
-# Prometheus metrics
+curl http://localhost:3000/api/stats
+curl "http://localhost:3000/api/history?limit=10&row_type=raw"
 curl http://localhost:3000/metrics
-
-# Live connections (top 50 by packet count)
-curl http://localhost:3000/api/live
 ```
-
-You can also verify the eBPF program is loaded in the kernel:
-```bash
-sudo bpftool prog show name ayaflow
-```
-
----
 
 ## Configuration
 
-ayaFlow accepts configuration through **CLI flags**, **environment variables**, or a **YAML config file**. CLI flags take the highest precedence.
+ayaFlow supports CLI flags and YAML config files. CLI flags override file values.
 
-| CLI Flag | Env Var | Description | Default |
-|---|---|---|---|
-| `-i, --interface` | `AYAFLOW_INTERFACE` | Network interface to attach to | `eth0` |
-| `-p, --port` | `AYAFLOW_PORT` | HTTP API port | `3000` |
-| `--db-path` | `AYAFLOW_DB_PATH` | SQLite database file path | `traffic.db` |
-| `--connection-timeout` | `AYAFLOW_CONNECTION_TIMEOUT` | Seconds before a connection is marked stale | `60` |
-| `--data-retention` | `AYAFLOW_DATA_RETENTION` | Auto-delete packets older than N seconds | Disabled |
-| `--aggregation-window` | `AYAFLOW_AGGREGATION_WINDOW` | Aggregate events into N-second windows | `0` (off) |
-| `--allowed-ips` | `AYAFLOW_ALLOWED_IPS` | CIDRs allowed to hit the API | All |
-| `-q, --quiet` | `AYAFLOW_QUIET` | Suppress non-error logs | `false` |
-| `--deep-inspect` | `AYAFLOW_DEEP_INSPECT` | Enable DNS + TLS SNI domain extraction | `false` |
-| `--resolve-dns` | `AYAFLOW_RESOLVE_DNS` | Enable reverse DNS resolution for IPs | `false` |
-| `-c, --config` | `AYAFLOW_CONFIG` | Path to YAML config file | None |
-
-### Example YAML config
+### Example config
 
 ```yaml
-interface: eth0
-port: 8080
+interface: ens5
+port: 3000
 db_path: /data/traffic.db
-connection_timeout: 300
-data_retention_seconds: 86400   # 1 day
-aggregation_window_seconds: 60  # 1-minute buckets
-deep_inspect: true              # DNS + TLS SNI extraction
-resolve_dns: true               # Reverse DNS lookups
+connection_timeout: 60
+data_retention_seconds: 86400
+aggregation_window_seconds: 0
+resolve_dns: true
+deep_inspect: true
+enable_ipv6: true
 allowed_ips:
   - "127.0.0.1/32"
-  - "192.168.1.0/24"
+  - "10.0.0.0/8"
 ```
 
-Run with the config file:
+Run with a config file:
+
 ```bash
 sudo ./target/debug/ayaflow -c config.yaml
 ```
 
----
+## History API
 
-## API Endpoints
+The history endpoint now returns pagination metadata and supports filtering:
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/health` | GET | Health check with basic counters |
-| `/api/stats` | GET | Uptime, throughput, connection counts |
-| `/api/live` | GET | Top 50 active connections by packet count |
-| `/api/history?limit=N` | GET | Recent packets from SQLite (max 1000) |
-| `/api/stream` | WS | WebSocket push every 1 second |
-| `/metrics` | GET | Prometheus text-format metrics |
+```bash
+curl "http://localhost:3000/api/history?limit=20&offset=0&protocol=TCP&dst_port=443&row_type=raw"
+```
 
----
+Available filters:
 
-## Grafana Dashboard
+- `limit`, `offset`
+- `start_time`, `end_time`
+- `protocol`
+- `ip`, `src_ip`, `dst_ip`
+- `port`, `src_port`, `dst_port`
+- `direction`
+- `domain`
+- `row_type=raw|aggregated`
 
-A pre-built dashboard is provided in `grafana/dashboard.json`.
-
-1. Open Grafana.
-2. Navigate to **Dashboards** > **New** > **Import**.
-3. Upload the JSON file or paste its contents.
-4. Select your Prometheus data source.
-
-Panels included: Active Connections (gauge), Packets/sec, Throughput/sec, and historical trends.
-
----
+Aggregated rows include `packet_count` and `row_type=aggregated` so consumers can distinguish them from raw packet rows.
 
 ## Troubleshooting
 
-**`failed to load bpf program`**
-- Confirm BTF support: `ls /sys/kernel/btf/vmlinux`
-- Confirm you are running as root or with `sudo`.
+**`cargo xtask build` fails on macOS**
 
-**`operation not permitted`**
-- Check capabilities. You need `CAP_BPF`, `CAP_NET_ADMIN`, and `CAP_PERFMON`.
-- Check if another eBPF program is already attached: `tc qdisc show dev eth0`
+That command is Linux-only by design. Use `cargo xtask check-host` and the host-safe workflow above, then switch to a Linux VM or container host for the eBPF build.
+
+**`failed to load eBPF program`**
+
+- Confirm kernel BTF support: `ls /sys/kernel/btf/vmlinux`
+- Confirm Linux capabilities or run with `sudo`
+- Confirm the eBPF artifact exists by re-running `cargo xtask build`
 
 **No packets visible**
-- Verify you selected the correct interface (`--interface`).
-- Confirm traffic is actually hitting that interface with `tcpdump -i eth0`.
-- Check the `ayaflow_packets_total` metric to see if the kernel probe is seeing anything at all.
+
+- Let ayaFlow auto-detect the interface first, or inspect the default route with `ip route`
+- Override `--interface` only when you know the correct device name
+- Confirm traffic is present with `curl`, `ping`, or `nslookup`, then re-check `/api/stats`

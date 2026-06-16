@@ -1,202 +1,137 @@
 # ayaFlow
 
-A high-performance, eBPF-based network traffic analyzer written in Rust. Designed to run as a sidecarless DaemonSet in Kubernetes, providing kernel-native visibility into node-wide network traffic with minimal overhead.
+ayaFlow is a Rust + eBPF network traffic analyzer built with [Aya](https://aya-rs.dev/). It runs one agent per Linux node, attaches a TC classifier at ingress and egress, and exposes live traffic data, historical SQLite-backed history, and Prometheus metrics.
 
-Built on the [Aya](https://aya-rs.dev/) eBPF framework.
+## What It Does
 
-## Architecture
+- Captures IPv4, IPv6, TCP, and UDP traffic with an eBPF TC classifier.
+- Maintains live connection stats in memory and historical records in SQLite.
+- Optionally enriches traffic with reverse DNS, DNS query domains, and TLS SNI.
+- Exposes a REST API, WebSocket stream, and Prometheus `/metrics` endpoint.
+- Ships with Docker, Kubernetes, Prometheus, and Grafana examples.
 
-```
-                                KERNEL SPACE
-          +-------------------------------------------------------+
-          |                                                       |
-          |   NIC                                                 |
-          |    |                                                  |
-          |    +-- TC Hook (Ingress + Egress)                     |
-          |           |                                           |
-          |       eBPF Classifier                                 |
-          |           |                                           |
-          |       PacketEvent --> Ring Buffer                     |
-          |                          |                            |
-          +-------------------------------------------------------+
-                                    |
-                                USER SPACE
-          +-------------------------------------------------------+
-          |                          |                            |
-          |                   Tokio Event Loop                    |
-          |                     /    |    \                       |
-          |                    /     |     \                      |
-          |            DashMap    SQLite    Axum HTTP             |
-          |          (live stats) (history) (API + metrics)       |
-          |                                                       |
-          +-------------------------------------------------------+
-```
+## Supported Development Flow
 
-**Kernel-side** -- A TC (Traffic Control) classifier attached at both ingress and egress parses Ethernet/IPv4/IPv6/TCP/UDP headers and pushes lightweight `PacketEvent` structs (with a direction tag) to a shared ring buffer.
+ayaFlow's packet-capture runtime is Linux-only. Contributor workflows are split on purpose:
 
-**Userspace** -- An async Tokio agent polls the ring buffer, maintains live connection state in a DashMap, persists events to SQLite, and exposes a REST API with Prometheus metrics.
+- Host-safe checks on macOS or Linux:
+  - `cargo test -p ayaflow-common`
+  - `cargo test -p ayaflow`
+  - `cargo xtask build-user`
+  - `cargo xtask check-host`
+- Linux-only build and runtime:
+  - `cargo xtask build-ebpf`
+  - `cargo xtask build`
+  - `cargo xtask run -- --deep-inspect`
 
-## Features
-
-- **eBPF-native capture** -- No libpcap, no privileged sidecar. Hooks directly into the kernel's traffic control subsystem.
-- **Sidecarless DaemonSet** -- One pod per node instead of one per application pod.
-- **Broad Protocol Support** -- Captures and parses IPv4, IPv6, TCP, and UDP headers.
-- **Real-time monitoring** -- Live dashboard via REST API + WebSocket streaming.
-- **Persistent history** -- SQLite storage with configurable data retention and aggregation.
-- **Deep L7 inspection** -- Optional TLS SNI and DNS query extraction for domain-level visibility into encrypted traffic.
-- **Prometheus /metrics** -- Native exporter for `ayaflow_packets_total`, `ayaflow_bytes_total`, `ayaflow_active_connections`, `ayaflow_domains_resolved_total`, `ayaflow_deep_inspect_packets_total`.
-- **IP allowlist** -- Restrict API/dashboard access by source CIDR.
-
-## Observability
-
-ayaFlow includes a fully configured Prometheus and Grafana monitoring stack for out-of-the-box observability. 
-
-See `docker-compose.monitoring.example.yml` to spin up ayaFlow with Prometheus (pre-configured to scrape the `/metrics` endpoint) and Grafana (auto-provisioned with the datasource and dashboard).
-
-## Prerequisites
-
-- **Rust**: Stable + nightly toolchain
-- **bpf-linker**: `cargo +nightly install bpf-linker`
-- **Linux kernel**: >= 5.8 with BTF support (for eBPF)
-- **Capabilities**: `CAP_BPF`, `CAP_NET_ADMIN`, `CAP_PERFMON`
+If you are on macOS, use Docker or a Linux VM for the full eBPF workflow. See [HOW_TO_USE_LOCAL.md](/Users/David/Documents/GitHub/ayaFlow/HOW_TO_USE_LOCAL.md) for both paths.
 
 ## Quick Start
 
-### Install via Docker Packages (Recommended)
-
-You can pull the pre-built Docker image directly from the GitHub Container Registry. The image is automatically built for OS/Arch `linux/amd64`.
+### 1. Check host support
 
 ```bash
-docker pull ghcr.io/davidhavoc/ayaflow:latest
+cargo xtask check-host
 ```
 
-### Build from Source
+### 2. Build on Linux
 
 ```bash
-# Install bpf-linker (one-time)
-cargo +nightly install bpf-linker
-
-# Build everything (eBPF + userspace)
 cargo xtask build
 ```
 
-### Run
+### 3. Run on Linux
 
 ```bash
-# Requires root for eBPF attachment
-sudo ./target/debug/ayaflow --interface eth0
+sudo ./target/debug/ayaflow --db-path /tmp/traffic.db
 ```
 
-### Verify
+If `--interface` is omitted, ayaFlow auto-detects the default route interface from `/proc/net/route` and falls back to `eth0` only if detection fails.
+
+### 4. Verify
 
 ```bash
 curl http://localhost:3000/api/health
+curl http://localhost:3000/api/stats
+curl "http://localhost:3000/api/history?limit=5&row_type=raw"
 curl http://localhost:3000/metrics
 ```
 
 ## CLI Options
 
 | Flag | Description | Default |
-|------|-------------|---------|
-| `-i, --interface` | Network interface to attach eBPF on | `eth0` |
+|---|---|---|
+| `-i, --interface` | Interface to monitor. Omit to auto-detect the default route interface on Linux. | auto-detect, fallback `eth0` |
 | `-p, --port` | API server port | `3000` |
 | `--db-path` | SQLite database path | `traffic.db` |
-| `--connection-timeout` | Stale connection cleanup (seconds) | `60` |
-| `--data-retention` | Auto-delete packets older than (seconds) | disabled |
-| `--aggregation-window` | Aggregate events per window (seconds) | `0` (off) |
-| `--allowed-ips` | CIDR(s) allowed to access the API | unrestricted |
-| `-c, --config` | Path to YAML config file | - |
+| `--connection-timeout` | Stale connection cleanup in seconds | `60` |
+| `--data-retention` | Auto-delete history older than N seconds | disabled |
+| `--aggregation-window` | Store aggregated history windows instead of raw packet rows | `0` (raw mode) |
+| `--allowed-ips` | CIDRs allowed to access the API | unrestricted |
+| `-c, --config` | YAML config file path | none |
 | `-q, --quiet` | Suppress non-error logs | `false` |
-| `--deep-inspect` | Enable DNS + TLS SNI domain extraction | `false` |
-| `--enable-ipv6` | Enable IPv6 packet capture | `false` (IPv4 only default) |
-| `--resolve-dns` | Enable reverse DNS resolution for IPs | `false` |
-
-## Kubernetes Deployment
-
-Deploy as a DaemonSet (see `k8s/daemonset.yaml`):
-
-```bash
-kubectl apply -f k8s/daemonset.yaml
-```
-
-The DaemonSet uses `hostNetwork: true` and mounts `/sys/fs/bpf`. Prometheus scrape annotations are included by default.
-
-### Resource Recommendations
-
-```yaml
-resources:
-  requests:
-    memory: "32Mi"
-    cpu: "50m"
-  limits:
-    memory: "128Mi"
-    cpu: "500m"
-```
+| `--deep-inspect` | Enable DNS query + TLS SNI extraction | `false` |
+| `--enable-ipv6` | Enable IPv6 packet capture | `false` |
+| `--resolve-dns` | Enable reverse DNS lookups | `false` |
 
 ## API Reference
 
 | Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check with basic counters |
-| `/api/stats` | GET | Uptime, throughput, connection counts |
+|---|---|---|
+| `/api/health` | GET | Health status, packet counters, and active runtime configuration |
+| `/api/stats` | GET | Uptime, throughput, counts, and active runtime configuration |
 | `/api/live` | GET | Top 50 active connections by packet count |
-| `/api/history?limit=N` | GET | Recent packets from SQLite (max 1000) |
-| `/api/stream` | WS | WebSocket push of stats every 1s |
-| `/metrics` | GET | Prometheus text-format metrics |
+| `/api/history` | GET | Filterable historical traffic with pagination metadata |
+| `/api/stream` | WS | Live stats every second |
+| `/metrics` | GET | Prometheus text format |
+
+`/api/history` supports:
+
+- `limit`, `offset`
+- `start_time`, `end_time`
+- `protocol`
+- `ip`, `src_ip`, `dst_ip`
+- `port`, `src_port`, `dst_port`
+- `direction`
+- `domain`
+- `row_type=raw|aggregated`
+
+Example:
+
+```bash
+curl "http://localhost:3000/api/history?limit=20&protocol=TCP&dst_port=443&row_type=raw"
+```
 
 ## Project Structure
 
-```
-ayaflow-common/    # Shared types (no_std, used by both kernel and userspace)
-ayaflow-ebpf/      # eBPF kernel program (TC classifier)
-ayaflow/           # Userspace agent (Aya loader + Tokio + Axum)
-xtask/             # Build orchestration (cargo xtask)
-k8s/               # Kubernetes DaemonSet manifest
-```
-
-## Performance & Footprint
-
-Measured on a minimal VM (Ubuntu 24.04, 2 vCPU, 2 GB RAM):
-
-| Metric | Value |
-|--------|-------|
-| Userspace RSS (steady-state) | ~33 MB |
-| eBPF program (xlated) | 784 B |
-| eBPF program (JIT-compiled) | 576 B |
-| eBPF program memlock | 4 KB |
-| EVENTS ring buffer | 256 KB |
-| PAYLOAD_EVENTS ring buffer | 256 KB (only used when `--deep-inspect` is on) |
-| Ring buffer memlock | ~270 KB (540 KB with deep inspect) |
-| Memory growth over time | None observed (stable RSS) |
-
-The eBPF classifier is verified loaded via `bpftool`:
-
-```
-$ sudo bpftool prog show name ayaflow
-430: sched_cls  name ayaflow  tag 0dabf78b3d068075  gpl
-     loaded_at 2026-02-16T16:38:12+0100  uid 0
-     xlated 784B  jited 576B  memlock 4096B  map_ids 76
+```text
+ayaflow/           Userspace runtime, API, storage, and host-safe tests
+ayaflow-common/    Shared packet/event types used by userspace and eBPF
+ayaflow-ebpf/      TC classifier and payload capture program
+xtask/             Build and workflow helpers
+k8s/               Kubernetes manifests
+monitoring/        Prometheus and Grafana assets
 ```
 
-## Tested On
+The duplicate root-level `src/` tree is legacy and not part of the supported build path. Use the `ayaflow/` crate and `cargo xtask` commands above.
 
-- **OS**: Ubuntu 24.04 LTS (aarch64)
-- **Kernel**: 6.x with BTF support
-- **Hardware**: 2 vCPU, 2 GB RAM (Lima VM)
-- **Rust**: nightly toolchain + `bpf-linker`
+## Deployment Guides
 
-## License
+- Local Linux and macOS+VM workflows: [HOW_TO_USE_LOCAL.md](/Users/David/Documents/GitHub/ayaFlow/HOW_TO_USE_LOCAL.md)
+- Docker: [HOW_TO_USE_DOCKER.md](/Users/David/Documents/GitHub/ayaFlow/HOW_TO_USE_DOCKER.md)
+- Kubernetes: [HOW_TO_USE_K8S.md](/Users/David/Documents/GitHub/ayaFlow/HOW_TO_USE_K8S.md)
 
-This project utilizes three different licenses depending on the component:
+## Technical Docs
 
-### Userspace Components
-The userspace agent and common libraries (`ayaflow` and `ayaflow-common`) are dual-licensed under either of:
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT License](LICENSE-MIT)
+- Architecture: [ARCHITECTURE.md](/Users/David/Documents/GitHub/ayaFlow/ARCHITECTURE.md)
+- Footprint and performance notes: [PERFORMANCE.md](/Users/David/Documents/GitHub/ayaFlow/PERFORMANCE.md)
 
-at your option.
+## Tested Here
 
-### Kernel Components
-The eBPF kernel components (`ayaflow-ebpf`) are licensed strictly under the [GNU General Public License v2.0](LICENSE-GPL) (GPL) to ensure compatibility with the Linux kernel verifier.
+The host-safe workflow now passes on this macOS development machine with:
 
+- `cargo test -p ayaflow-common`
+- `cargo test -p ayaflow`
+- `cargo xtask check-host`
 
+Linux-only runtime validation still needs to happen on a Linux host or CI runner with the eBPF toolchain installed.

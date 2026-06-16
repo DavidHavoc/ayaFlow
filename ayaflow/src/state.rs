@@ -131,6 +131,9 @@ impl AggregatedBucket {
     pub fn merge(&mut self, packet: &PacketMetadata) {
         self.packet_count += 1;
         self.total_bytes += packet.length as u64;
+        if self.domain.is_none() {
+            self.domain = packet.domain.clone();
+        }
     }
 }
 
@@ -143,6 +146,12 @@ pub struct TrafficState {
     pub deep_inspect_packets: AtomicU64,
     /// Total domains successfully resolved from DNS/TLS SNI.
     pub domains_resolved: AtomicU64,
+}
+
+impl Default for TrafficState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TrafficState {

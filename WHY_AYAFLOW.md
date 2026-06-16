@@ -67,26 +67,33 @@ Each ayaFlow pod monitors the traffic on its own node. Prometheus discovers
 all pods via the scrape annotations in the DaemonSet spec and aggregates the
 metrics cluster-wide.
 
-## Measured Performance
+## Performance & Footprint
 
-Tested on Ubuntu 24.04 (2 vCPU, 2 GB RAM):
+These numbers come from earlier Linux test runs and older validation notes. They are useful reference points for why ayaFlow is lightweight, though they should still be refreshed on a current Linux environment before being treated as release-grade benchmarks.
+
+Measured on a minimal VM (Ubuntu 24.04, 2 vCPU, 2 GB RAM):
 
 | Metric | Value |
 |--------|-------|
 | Userspace RSS (steady-state) | ~33 MB |
+| eBPF program (xlated) | 784 B |
 | eBPF program (JIT-compiled) | 576 B |
-| Ring buffer allocation | 256 KB |
-| Memory growth over time | None observed |
-| GC pauses | None (Rust, no garbage collector) |
+| eBPF program memlock | 4 KB |
+| EVENTS ring buffer | 256 KB |
+| PAYLOAD_EVENTS ring buffer | 256 KB (only used when `--deep-inspect` is on) |
+| Ring buffer memlock | ~270 KB (540 KB with deep inspect) |
+| Memory growth over time | None observed (stable RSS) |
 
-The eBPF classifier verified via `bpftool`:
+The eBPF classifier was verified loaded via `bpftool`:
 
-```
+```bash
 $ sudo bpftool prog show name ayaflow
 430: sched_cls  name ayaflow  tag 0dabf78b3d068075  gpl
      loaded_at 2026-02-16T16:38:12+0100  uid 0
      xlated 784B  jited 576B  memlock 4096B  map_ids 76
 ```
+
+The fuller benchmark and measurement notes still live in [PERFORMANCE.md](/Users/David/Documents/GitHub/ayaFlow/PERFORMANCE.md).
 
 ## Summary
 

@@ -1,12 +1,16 @@
 use dashmap::DashMap;
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tokio::time::{Duration, Instant};
 
-use aya::maps::RingBuf;
-use ayaflow_common::{PayloadEvent, MAX_PAYLOAD_LEN};
-
+#[cfg(target_os = "linux")]
 use crate::state::TrafficState;
+#[cfg(target_os = "linux")]
+use aya::maps::RingBuf;
+#[cfg(target_os = "linux")]
+use ayaflow_common::{PayloadEvent, MAX_PAYLOAD_LEN};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::Ordering;
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
 
 // ── DNS Parser ────────────────────────────────────────────────────────────────
 
@@ -238,6 +242,14 @@ impl DomainCache {
         );
     }
 
+    pub fn insert_packet_domain(&self, packet: &DomainPacketKey<'_>, domain: String) {
+        self.insert(&packet.key(), domain);
+    }
+
+    pub fn get_packet_domain(&self, packet: &DomainPacketKey<'_>) -> Option<String> {
+        self.get(&packet.key())
+    }
+
     /// Look up a domain by connection key.
     pub fn get(&self, key: &str) -> Option<String> {
         if let Some(entry) = self.cache.get(key) {
@@ -261,9 +273,28 @@ impl DomainCache {
     }
 }
 
+pub struct DomainPacketKey<'a> {
+    pub protocol: &'a str,
+    pub src_ip: &'a str,
+    pub dst_ip: &'a str,
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub direction: &'a str,
+}
+
+impl DomainPacketKey<'_> {
+    fn key(&self) -> String {
+        format!(
+            "packet:{}:{}:{}:{}:{}:{}",
+            self.protocol, self.src_ip, self.src_port, self.dst_ip, self.dst_port, self.direction
+        )
+    }
+}
+
 // ── Address Helpers ───────────────────────────────────────────────────────────
 
 /// Convert a 16-byte address + addr_type into a human-readable IP string.
+#[cfg(target_os = "linux")]
 fn payload_addr_to_string(raw: &[u8; 16], addr_type: u8) -> String {
     if addr_type == 4 {
         // IPv4-mapped-IPv6: last 4 bytes hold the IPv4 octets.
@@ -277,6 +308,7 @@ fn payload_addr_to_string(raw: &[u8; 16], addr_type: u8) -> String {
 
 /// Continuously poll the PAYLOAD_EVENTS eBPF RingBuf, parse DNS/TLS payloads,
 /// and populate the domain cache.
+#[cfg(target_os = "linux")]
 pub async fn poll_payload_ring_buf(
     mut ring_buf: RingBuf<aya::maps::MapData>,
     domain_cache: Arc<DomainCache>,
@@ -287,10 +319,11 @@ pub async fn poll_payload_ring_buf(
             if item.len() < core::mem::size_of::<PayloadEvent>() {
                 continue;
             }
-            let event =
-                unsafe { core::ptr::read_unaligned(item.as_ptr() as *const PayloadEvent) };
+            let event = unsafe { core::ptr::read_unaligned(item.as_ptr() as *const PayloadEvent) };
 
-            traffic_state.deep_inspect_packets.fetch_add(1, Ordering::Relaxed);
+            traffic_state
+                .deep_inspect_packets
+                .fetch_add(1, Ordering::Relaxed);
 
             let payload_len = (event.payload_len as usize).min(MAX_PAYLOAD_LEN);
             let payload = &event.payload[..payload_len];
@@ -302,8 +335,23 @@ pub async fn poll_payload_ring_buf(
             if event.protocol == 17 && (event.dst_port == 53 || event.src_port == 53) {
                 if let Some(domain) = parse_dns_query(payload) {
                     tracing::debug!("DNS query: {} -> {}", src_ip, domain);
+                    let direction = payload_direction(event.direction);
+                    let protocol = payload_protocol(event.protocol);
+                    domain_cache.insert_packet_domain(
+                        &DomainPacketKey {
+                            protocol,
+                            src_ip: &src_ip,
+                            dst_ip: &dst_ip,
+                            src_port: event.src_port,
+                            dst_port: event.dst_port,
+                            direction,
+                        },
+                        domain.clone(),
+                    );
                     domain_cache.insert(&format!("dns:{}", domain), domain.clone());
-                    traffic_state.domains_resolved.fetch_add(1, Ordering::Relaxed);
+                    traffic_state
+                        .domains_resolved
+                        .fetch_add(1, Ordering::Relaxed);
                 }
             }
 
@@ -312,14 +360,47 @@ pub async fn poll_payload_ring_buf(
                 if let Some(sni) = parse_tls_sni(payload) {
                     let key = format!("{}:{}", dst_ip, event.dst_port);
                     tracing::debug!("TLS SNI: {} -> {} ({})", src_ip, dst_ip, sni);
+                    let direction = payload_direction(event.direction);
+                    let protocol = payload_protocol(event.protocol);
+                    domain_cache.insert_packet_domain(
+                        &DomainPacketKey {
+                            protocol,
+                            src_ip: &src_ip,
+                            dst_ip: &dst_ip,
+                            src_port: event.src_port,
+                            dst_port: event.dst_port,
+                            direction,
+                        },
+                        sni.clone(),
+                    );
                     domain_cache.insert(&key, sni);
-                    traffic_state.domains_resolved.fetch_add(1, Ordering::Relaxed);
+                    traffic_state
+                        .domains_resolved
+                        .fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
 
         // Yield briefly to avoid busy-spinning.
         tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn payload_protocol(protocol: u8) -> &'static str {
+    match protocol {
+        6 => "TCP",
+        17 => "UDP",
+        _ => "IP",
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn payload_direction(direction: u8) -> &'static str {
+    if direction == 0 {
+        "ingress"
+    } else {
+        "egress"
     }
 }
 
@@ -343,9 +424,7 @@ mod tests {
         ];
         // QNAME: "example.com" = [7]example[3]com[0]
         packet.extend_from_slice(&[
-            7, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
-            3, b'c', b'o', b'm',
-            0, // root label
+            7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0, // root label
         ]);
         // QTYPE (A = 1) and QCLASS (IN = 1)
         packet.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]);
@@ -357,20 +436,19 @@ mod tests {
     #[test]
     fn test_parse_dns_query_subdomain() {
         let mut packet: Vec<u8> = vec![
-            0x00, 0x00, 0x01, 0x00,
-            0x00, 0x01, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         // "www.example.com"
         packet.extend_from_slice(&[
-            3, b'w', b'w', b'w',
-            7, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
-            3, b'c', b'o', b'm',
+            3, b'w', b'w', b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm',
             0,
         ]);
         packet.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]);
 
-        assert_eq!(parse_dns_query(&packet), Some("www.example.com".to_string()));
+        assert_eq!(
+            parse_dns_query(&packet),
+            Some("www.example.com".to_string())
+        );
     }
 
     #[test]
@@ -381,8 +459,7 @@ mod tests {
     #[test]
     fn test_parse_dns_query_no_questions() {
         let packet: Vec<u8> = vec![
-            0x00, 0x00, 0x01, 0x00,
-            0x00, 0x00, // QDCOUNT: 0
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // QDCOUNT: 0
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         assert_eq!(parse_dns_query(&packet), None);
@@ -482,13 +559,36 @@ mod tests {
     fn test_domain_cache_insert_and_get() {
         let cache = DomainCache::new(Duration::from_secs(300));
         cache.insert("192.168.1.1:443", "example.com".to_string());
-        assert_eq!(cache.get("192.168.1.1:443"), Some("example.com".to_string()));
+        assert_eq!(
+            cache.get("192.168.1.1:443"),
+            Some("example.com".to_string())
+        );
     }
 
     #[test]
     fn test_domain_cache_miss() {
         let cache = DomainCache::new(Duration::from_secs(300));
         assert_eq!(cache.get("10.0.0.1:443"), None);
+    }
+
+    #[test]
+    fn test_domain_cache_packet_key() {
+        let cache = DomainCache::new(Duration::from_secs(300));
+        let key = DomainPacketKey {
+            protocol: "UDP",
+            src_ip: "172.17.0.2",
+            dst_ip: "192.168.65.7",
+            src_port: 53000,
+            dst_port: 53,
+            direction: "egress",
+        };
+
+        cache.insert_packet_domain(&key, "example.com".to_string());
+
+        assert_eq!(
+            cache.get_packet_domain(&key),
+            Some("example.com".to_string())
+        );
     }
 
     #[test]

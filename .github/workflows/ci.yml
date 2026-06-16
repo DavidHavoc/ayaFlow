@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  host-safe:
+    name: Host-safe checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy -p ayaflow-common -p ayaflow -p xtask --all-targets -- -D warnings
+
+      - name: Host support summary
+        run: cargo xtask check-host
+
+      - name: Test shared crate
+        run: cargo test -p ayaflow-common
+
+      - name: Test host-safe userspace crate
+        run: cargo test -p ayaflow
+
+  linux-ebpf-build:
+    name: Linux eBPF build validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install bpf-linker
+        run: cargo +nightly install bpf-linker
+
+      - name: Build userspace
+        run: cargo xtask build-user
+
+      - name: Build full Linux pipeline
+        run: cargo xtask build

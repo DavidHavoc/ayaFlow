@@ -110,6 +110,8 @@ mod tests {
         assert_eq!(result, None);
 
         // The failed lookup should still be cached.
-        assert!(cache.cache.contains_key(&"192.0.2.1".parse::<IpAddr>().unwrap()));
+        assert!(cache
+            .cache
+            .contains_key(&"192.0.2.1".parse::<IpAddr>().unwrap()));
     }
 }

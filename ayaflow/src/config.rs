@@ -50,6 +50,20 @@ pub struct Config {
     pub allowed_ips: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RuntimeSettings {
+    pub interface: String,
+    pub port: u16,
+    pub db_path: String,
+    pub connection_timeout: u64,
+    pub data_retention_seconds: Option<u64>,
+    pub aggregation_window_seconds: u64,
+    pub resolve_dns: bool,
+    pub deep_inspect: bool,
+    pub enable_ipv6: bool,
+    pub allowed_ips: Vec<String>,
+}
+
 fn default_port() -> u16 {
     3000
 }
@@ -123,6 +137,21 @@ impl Config {
             self.allowed_ips = cli.allowed_ips.clone();
         }
     }
+
+    pub fn runtime_settings(&self, interface: String) -> RuntimeSettings {
+        RuntimeSettings {
+            interface,
+            port: self.port,
+            db_path: self.db_path.clone(),
+            connection_timeout: self.connection_timeout,
+            data_retention_seconds: self.data_retention_seconds,
+            aggregation_window_seconds: self.aggregation_window_seconds,
+            resolve_dns: self.resolve_dns,
+            deep_inspect: self.deep_inspect,
+            enable_ipv6: self.enable_ipv6,
+            allowed_ips: self.allowed_ips.clone(),
+        }
+    }
 }
 
 use clap::Parser;
@@ -178,4 +207,79 @@ pub struct CliArgs {
     /// IP CIDRs allowed to access the API (e.g., 10.0.0.0/8). Repeat for multiple.
     #[arg(long)]
     pub allowed_ips: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_expected_values() {
+        let config = Config::default();
+
+        assert!(config.interface.is_none());
+        assert_eq!(config.port, 3000);
+        assert_eq!(config.db_path, "traffic.db");
+        assert_eq!(config.connection_timeout, 60);
+        assert!(!config.quiet);
+        assert_eq!(config.data_retention_seconds, None);
+        assert_eq!(config.aggregation_window_seconds, 0);
+        assert!(!config.resolve_dns);
+        assert!(!config.deep_inspect);
+        assert!(!config.enable_ipv6);
+        assert!(config.allowed_ips.is_empty());
+    }
+
+    #[test]
+    fn merge_cli_overrides_file_values() {
+        let mut config = Config {
+            interface: Some("ens5".to_string()),
+            port: 8080,
+            db_path: "/tmp/from-config.db".to_string(),
+            connection_timeout: 120,
+            quiet: false,
+            data_retention_seconds: Some(600),
+            aggregation_window_seconds: 30,
+            resolve_dns: false,
+            deep_inspect: false,
+            enable_ipv6: false,
+            allowed_ips: vec!["10.0.0.0/8".to_string()],
+        };
+
+        let cli = CliArgs::parse_from([
+            "ayaflow",
+            "--interface",
+            "eth1",
+            "--port",
+            "9090",
+            "--db-path",
+            "/tmp/from-cli.db",
+            "--connection-timeout",
+            "15",
+            "--data-retention",
+            "42",
+            "--aggregation-window",
+            "5",
+            "--resolve-dns",
+            "--deep-inspect",
+            "--enable-ipv6",
+            "--allowed-ips",
+            "127.0.0.1/32",
+            "--quiet",
+        ]);
+
+        config.merge_cli(&cli);
+
+        assert_eq!(config.interface.as_deref(), Some("eth1"));
+        assert_eq!(config.port, 9090);
+        assert_eq!(config.db_path, "/tmp/from-cli.db");
+        assert_eq!(config.connection_timeout, 15);
+        assert!(config.quiet);
+        assert_eq!(config.data_retention_seconds, Some(42));
+        assert_eq!(config.aggregation_window_seconds, 5);
+        assert!(config.resolve_dns);
+        assert!(config.deep_inspect);
+        assert!(config.enable_ipv6);
+        assert_eq!(config.allowed_ips, vec!["127.0.0.1/32".to_string()]);
+    }
 }

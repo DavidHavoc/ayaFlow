@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-aya = "0.13"
 ayaflow-common = { path = "../ayaflow-common", features = ["user"] }
 tokio = { version = "1.37", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
@@ -23,3 +22,11 @@ prometheus-client = "0.22"
 ipnet = "2"
 anyhow = "1"
 dns-lookup = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+aya = "0.13"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

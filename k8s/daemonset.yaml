@@ -21,7 +21,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: ayaflow
-          image: ayaflow:latest
+          image: ghcr.io/davidhavoc/ayaflow:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: false
@@ -31,13 +31,25 @@ spec:
                 - NET_ADMIN  # Attach TC classifier
                 - PERFMON    # Access perf events / ring buffers
           args:
-            - "--interface"
-            - "eth0"
+            - "--db-path"
+            - "/data/traffic.db"
             - "--quiet" # comment it out to see logs 
           ports:
             - containerPort: 3000
               name: http
               hostPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
           volumeMounts:
             - name: bpffs
               mountPath: /sys/fs/bpf

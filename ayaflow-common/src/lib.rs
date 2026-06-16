@@ -7,9 +7,10 @@
 /// `chrono` is available.
 ///
 /// Addresses are stored as 16 bytes to support both IPv4 and IPv6:
-///   - IPv4: stored in IPv4-mapped-IPv6 format
-///            [0,0,0,0, 0,0,0,0, 0,0,0xff,0xff, a,b,c,d]
-///   - IPv6: raw 128-bit address.
+/// - IPv4: stored in IPv4-mapped-IPv6 format
+///   `[0,0,0,0, 0,0,0,0, 0,0,0xff,0xff, a,b,c,d]`
+/// - IPv6: raw 128-bit address.
+///
 /// The `addr_type` field discriminates: 4 = IPv4, 6 = IPv6.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -75,10 +76,10 @@ pub struct PayloadEvent {
     pub payload: [u8; MAX_PAYLOAD_LEN],
 }
 
-#[cfg(feature = "user")]
+#[cfg(all(feature = "user", target_os = "linux"))]
 unsafe impl aya::Pod for PacketEvent {}
 
-#[cfg(feature = "user")]
+#[cfg(all(feature = "user", target_os = "linux"))]
 unsafe impl aya::Pod for PayloadEvent {}
 
 /// Helper: build a 16-byte IPv4-mapped-IPv6 representation from a host-order
@@ -87,9 +88,6 @@ unsafe impl aya::Pod for PayloadEvent {}
 pub fn ipv4_mapped(addr: u32) -> [u8; 16] {
     let octets = addr.to_be_bytes();
     [
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0xff, 0xff,
-        octets[0], octets[1], octets[2], octets[3],
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, octets[0], octets[1], octets[2], octets[3],
     ]
 }
