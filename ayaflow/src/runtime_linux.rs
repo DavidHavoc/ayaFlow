@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -34,10 +34,8 @@ pub async fn run() -> anyhow::Result<()> {
     let interface = resolve_interface(&config);
     let runtime_settings = config.runtime_settings(interface.clone());
 
-    let mut bpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"
-    )))?;
+    let bpf_bytes = load_ebpf_object()?;
+    let mut bpf = Ebpf::load(&bpf_bytes)?;
 
     if let Err(e) = tc::qdisc_add_clsact(&interface) {
         if e.raw_os_error() != Some(17) {
@@ -196,6 +194,42 @@ pub async fn run() -> anyhow::Result<()> {
     tracing::info!("TC filters detached from {}, shutdown complete", interface);
 
     Ok(())
+}
+
+fn load_ebpf_object() -> anyhow::Result<Vec<u8>> {
+    let candidates = ebpf_object_candidates();
+
+    for candidate in &candidates {
+        if candidate.is_file() {
+            tracing::info!("Loading eBPF object from {}", candidate.display());
+            return std::fs::read(candidate)
+                .with_context(|| format!("failed to read eBPF object at {}", candidate.display()));
+        }
+    }
+
+    let searched_paths = candidates
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    anyhow::bail!(
+        "could not find the compiled eBPF object. Searched: {}. Run `cargo xtask build-ebpf` or `cargo xtask build` first.",
+        searched_paths
+    );
+}
+
+fn ebpf_object_candidates() -> Vec<PathBuf> {
+    if let Some(path) = std::env::var_os("AYAFLOW_EBPF_OBJECT") {
+        return vec![PathBuf::from(path)];
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    vec![
+        manifest_dir.join("../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"),
+        manifest_dir.join("../ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow"),
+    ]
 }
 
 fn init_logging(quiet: bool) {
