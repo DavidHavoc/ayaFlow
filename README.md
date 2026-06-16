@@ -135,3 +135,20 @@ The host-safe workflow now passes on this macOS development machine with:
 - `cargo xtask check-host`
 
 Linux-only runtime validation still needs to happen on a Linux host or CI runner with the eBPF toolchain installed.
+
+## License
+
+This project utilizes three different licenses depending on the component:
+
+### Userspace Components
+The userspace agent and common libraries (`ayaflow` and `ayaflow-common`) are dual-licensed under either of:
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+at your option.
+
+### Kernel Components
+The eBPF kernel components (`ayaflow-ebpf`) are licensed strictly under the [GNU General Public License v2.0](LICENSE-GPL) (GPL) to ensure compatibility with the Linux kernel verifier.
+
+
+
