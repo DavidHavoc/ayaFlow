@@ -329,4 +329,93 @@ mod tests {
         assert_eq!(state.total_bytes.load(Ordering::Relaxed), 200);
         assert_eq!(state.active_connections.load(Ordering::Relaxed), 1);
     }
+
+    #[test]
+    fn aggregated_bucket_accumulates_bytes_and_late_domain() {
+        let mut first = PacketMetadata {
+            timestamp: 100,
+            src_ip: "10.0.0.1".into(),
+            dst_ip: "1.1.1.1".into(),
+            src_port: 50_000,
+            dst_port: 443,
+            protocol: "TCP".into(),
+            length: 100,
+            direction: "egress".into(),
+            src_hostname: Some("client.local".into()),
+            dst_hostname: None,
+            domain: None,
+        };
+        let mut bucket = AggregatedBucket::from_packet(&first);
+        first.timestamp = 200;
+        first.length = 250;
+        first.domain = Some("example.com".into());
+
+        bucket.merge(&first);
+
+        assert_eq!(bucket.first_timestamp, 100);
+        assert_eq!(bucket.packet_count, 2);
+        assert_eq!(bucket.total_bytes, 350);
+        assert_eq!(bucket.domain.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn traffic_state_tracks_sent_and_received_bytes_separately() {
+        let state = TrafficState::new();
+        let mut packet = PacketMetadata {
+            timestamp: 0,
+            src_ip: "127.0.0.1".into(),
+            dst_ip: "127.0.0.1".into(),
+            src_port: 80,
+            dst_port: 1234,
+            protocol: "TCP".into(),
+            length: 100,
+            direction: "egress".into(),
+            src_hostname: None,
+            dst_hostname: None,
+            domain: None,
+        };
+
+        state.update(&packet);
+        packet.direction = "ingress".into();
+        packet.length = 40;
+        state.update(&packet);
+
+        let stats = state.connections.iter().next().unwrap();
+        assert_eq!(stats.bytes_sent, 100);
+        assert_eq!(stats.bytes_received, 40);
+        assert_eq!(stats.packets_count, 2);
+    }
+
+    #[test]
+    fn cleanup_removes_only_stale_connections() {
+        let state = TrafficState::new();
+        let mut packet = PacketMetadata {
+            timestamp: 0,
+            src_ip: "10.0.0.1".into(),
+            dst_ip: "1.1.1.1".into(),
+            src_port: 1000,
+            dst_port: 443,
+            protocol: "TCP".into(),
+            length: 100,
+            direction: "egress".into(),
+            src_hostname: None,
+            dst_hostname: None,
+            domain: None,
+        };
+        state.update(&packet);
+        let stale_key = "10.0.0.1:1000 -> 1.1.1.1:443";
+        state.connections.get_mut(stale_key).unwrap().last_seen =
+            Instant::now() - tokio::time::Duration::from_secs(6);
+
+        packet.src_port = 2000;
+        state.update(&packet);
+        state.cleanup_stale_connections(tokio::time::Duration::from_secs(5));
+
+        assert_eq!(state.connections.len(), 1);
+        assert_eq!(state.active_connections.load(Ordering::Relaxed), 1);
+        assert!(state
+            .connections
+            .iter()
+            .any(|entry| entry.key().contains(":2000")));
+    }
 }

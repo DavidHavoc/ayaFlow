@@ -606,4 +606,83 @@ mod tests {
         let body = response_json(response).await;
         assert_eq!(body["error"]["code"], "bad_request");
     }
+
+    #[tokio::test]
+    async fn stats_reports_current_totals_and_runtime() {
+        let response = test_app(&[])
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["total_packets"], 1);
+        assert_eq!(body["total_bytes"], 256);
+        assert_eq!(body["active_connections"], 1);
+        assert_eq!(body["runtime"]["db_path"], ":memory:");
+        assert!(body["packets_per_second"].is_number());
+        assert!(body["bytes_per_second"].is_number());
+    }
+
+    #[tokio::test]
+    async fn live_stats_returns_connection_details() {
+        let response = test_app(&[])
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/live")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["total_packets"], 1);
+        assert_eq!(body["connections"].as_array().unwrap().len(), 1);
+        assert_eq!(body["connections"][0]["stats"]["bytes_sent"], 256);
+        assert_eq!(body["connections"][0]["stats"]["packets_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn allowlist_accepts_matching_source_ip() {
+        let app = test_app(&["127.0.0.0/8".to_string()]);
+        let request = axum::http::Request::builder()
+            .uri("/api/health")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn history_rejects_invalid_ranges_types_and_ports() {
+        for uri in [
+            "/api/history?start_time=2&end_time=1",
+            "/api/history?row_type=summary",
+            "/api/history?port=70000",
+        ] {
+            let response = test_app(&[])
+                .oneshot(
+                    axum::http::Request::builder()
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "URI: {uri}");
+            let body = response_json(response).await;
+            assert_eq!(body["error"]["code"], "bad_request");
+        }
+    }
 }

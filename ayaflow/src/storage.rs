@@ -565,4 +565,81 @@ mod tests {
             .unwrap();
         assert_eq!(page.total, 0);
     }
+
+    #[tokio::test]
+    async fn raw_writer_flushes_buffer_when_channel_closes() {
+        let storage = Storage::new(":memory:").unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tx.send(sample_packet(100, Some("example.com")))
+            .await
+            .unwrap();
+        tx.send(sample_packet(200, Some("api.example.com")))
+            .await
+            .unwrap();
+        drop(tx);
+
+        storage.run_writer(rx, 0).await;
+
+        let page = storage
+            .query_history(&HistoryQuery {
+                limit: 10,
+                ..HistoryQuery::default()
+            })
+            .unwrap();
+        assert_eq!(page.total, 2);
+        assert!(page.items.iter().all(|item| item.row_type == "raw"));
+        assert!(page.items.iter().all(|item| item.packet_count == 1));
+    }
+
+    #[tokio::test]
+    async fn aggregated_writer_combines_connection_packets_on_shutdown() {
+        let storage = Storage::new(":memory:").unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let mut first = sample_packet(100, None);
+        first.length = 100;
+        let mut second = sample_packet(200, Some("example.com"));
+        second.length = 250;
+        tx.send(first).await.unwrap();
+        tx.send(second).await.unwrap();
+        drop(tx);
+
+        storage.run_writer(rx, 60).await;
+
+        let page = storage
+            .query_history(&HistoryQuery {
+                limit: 10,
+                row_type: Some(HistoryRowType::Aggregated),
+                ..HistoryQuery::default()
+            })
+            .unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].timestamp, 100);
+        assert_eq!(page.items[0].length, 350);
+        assert_eq!(page.items[0].packet_count, 2);
+        assert_eq!(page.items[0].domain.as_deref(), Some("example.com"));
+        assert_eq!(page.items[0].row_type, "aggregated");
+    }
+
+    #[test]
+    fn history_filters_match_both_sides_and_case_insensitively() {
+        let storage = Storage::new(":memory:").unwrap();
+        let packet = sample_packet(100, Some("example.com"));
+        storage.insert_packet(&packet).unwrap();
+
+        let page = storage
+            .query_history(&HistoryQuery {
+                limit: 10,
+                start_time: Some(100),
+                end_time: Some(100),
+                protocol: Some("tcp".to_string()),
+                ip: Some(packet.dst_ip.clone()),
+                port: Some(packet.src_port),
+                direction: Some("EGRESS".to_string()),
+                ..HistoryQuery::default()
+            })
+            .unwrap();
+
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].src_ip, packet.src_ip);
+    }
 }

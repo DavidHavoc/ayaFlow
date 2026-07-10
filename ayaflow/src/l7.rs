@@ -598,4 +598,34 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(10));
         assert_eq!(cache.get("key"), None);
     }
+
+    #[test]
+    fn test_parse_dns_query_rejects_compression_and_invalid_utf8() {
+        let mut compressed = vec![0; 12];
+        compressed[4] = 0;
+        compressed[5] = 1;
+        compressed.extend_from_slice(&[0xc0, 0x0c]);
+        assert_eq!(parse_dns_query(&compressed), None);
+
+        let mut invalid_utf8 = vec![0; 12];
+        invalid_utf8[4] = 0;
+        invalid_utf8[5] = 1;
+        invalid_utf8.extend_from_slice(&[1, 0xff, 0]);
+        assert_eq!(parse_dns_query(&invalid_utf8), None);
+    }
+
+    #[test]
+    fn test_domain_cache_cleanup_and_destination_lookup() {
+        let cache = DomainCache::new(Duration::from_millis(1));
+        cache.insert("1.1.1.1", "example.com".to_string());
+        assert_eq!(
+            cache.get_by_dst_ip("1.1.1.1"),
+            Some("example.com".to_string())
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        cache.cleanup_expired();
+
+        assert!(cache.cache.is_empty());
+    }
 }

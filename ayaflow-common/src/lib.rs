@@ -91,3 +91,16 @@ pub fn ipv4_mapped(addr: u32) -> [u8; 16] {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, octets[0], octets[1], octets[2], octets[3],
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ipv4_mapped_preserves_network_byte_order() {
+        assert_eq!(
+            ipv4_mapped(u32::from_be_bytes([192, 0, 2, 42])),
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 0, 2, 42]
+        );
+    }
+}

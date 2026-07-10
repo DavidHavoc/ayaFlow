@@ -212,6 +212,7 @@ pub struct CliArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn default_config_has_expected_values() {
@@ -281,5 +282,86 @@ mod tests {
         assert!(config.deep_inspect);
         assert!(config.enable_ipv6);
         assert_eq!(config.allowed_ips, vec!["127.0.0.1/32".to_string()]);
+    }
+
+    #[test]
+    fn from_file_applies_defaults_to_omitted_fields() {
+        use std::io::Write;
+
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            "interface: wlan0\nport: 8080\ndeep_inspect: true\nallowed_ips:\n  - 10.0.0.0/8"
+        )
+        .unwrap();
+
+        let config = Config::from_file(file.path()).unwrap();
+
+        assert_eq!(config.interface.as_deref(), Some("wlan0"));
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.db_path, "traffic.db");
+        assert_eq!(config.connection_timeout, 60);
+        assert!(config.deep_inspect);
+        assert_eq!(config.allowed_ips, vec!["10.0.0.0/8"]);
+    }
+
+    #[test]
+    fn default_cli_values_preserve_file_configuration() {
+        let mut config = Config {
+            interface: Some("ens5".to_string()),
+            port: 8080,
+            db_path: "/tmp/from-config.db".to_string(),
+            connection_timeout: 120,
+            quiet: true,
+            data_retention_seconds: Some(600),
+            aggregation_window_seconds: 30,
+            resolve_dns: true,
+            deep_inspect: true,
+            enable_ipv6: true,
+            allowed_ips: vec!["10.0.0.0/8".to_string()],
+        };
+
+        config.merge_cli(&CliArgs::parse_from(["ayaflow"]));
+
+        assert_eq!(config.interface.as_deref(), Some("ens5"));
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.db_path, "/tmp/from-config.db");
+        assert_eq!(config.connection_timeout, 120);
+        assert!(config.quiet);
+        assert_eq!(config.data_retention_seconds, Some(600));
+        assert_eq!(config.aggregation_window_seconds, 30);
+        assert!(config.resolve_dns);
+        assert!(config.deep_inspect);
+        assert!(config.enable_ipv6);
+        assert_eq!(config.allowed_ips, vec!["10.0.0.0/8"]);
+    }
+
+    #[test]
+    fn runtime_settings_uses_resolved_interface_and_excludes_quiet_mode() {
+        let config = Config {
+            port: 9090,
+            db_path: "capture.db".to_string(),
+            connection_timeout: 15,
+            data_retention_seconds: Some(3600),
+            aggregation_window_seconds: 10,
+            resolve_dns: true,
+            deep_inspect: true,
+            enable_ipv6: true,
+            allowed_ips: vec!["::1/128".to_string()],
+            ..Config::default()
+        };
+
+        let runtime = config.runtime_settings("eth9".to_string());
+
+        assert_eq!(runtime.interface, "eth9");
+        assert_eq!(runtime.port, 9090);
+        assert_eq!(runtime.db_path, "capture.db");
+        assert_eq!(runtime.connection_timeout, 15);
+        assert_eq!(runtime.data_retention_seconds, Some(3600));
+        assert_eq!(runtime.aggregation_window_seconds, 10);
+        assert!(runtime.resolve_dns);
+        assert!(runtime.deep_inspect);
+        assert!(runtime.enable_ipv6);
+        assert_eq!(runtime.allowed_ips, vec!["::1/128"]);
     }
 }
