@@ -26,6 +26,12 @@ dns-lookup = "2"
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = "0.13"
 
+[features]
+# Compile the eBPF object into the binary so it runs standalone. Used for
+# release builds (Dockerfile). Requires the eBPF crate to be built in release
+# mode first (`cargo xtask build-ebpf --release`).
+embed-ebpf = []
+
 [dev-dependencies]
 http-body-util = "0.1"
 tempfile = "3"

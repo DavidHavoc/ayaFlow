@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -35,7 +36,7 @@ pub async fn run() -> anyhow::Result<()> {
     let runtime_settings = config.runtime_settings(interface.clone());
 
     let bpf_bytes = load_ebpf_object()?;
-    let mut bpf = Ebpf::load(&bpf_bytes)?;
+    let mut bpf = Ebpf::load(bpf_bytes.as_ref())?;
 
     if let Err(e) = tc::qdisc_add_clsact(&interface) {
         if e.raw_os_error() != Some(17) {
@@ -215,8 +216,47 @@ async fn shutdown_signal() {
     }
 }
 
-fn load_ebpf_object() -> anyhow::Result<Vec<u8>> {
-    let candidates = ebpf_object_candidates();
+/// eBPF object compiled into release builds (`--features embed-ebpf`).
+#[cfg(feature = "embed-ebpf")]
+static EMBEDDED_EBPF: &[u8] = aya::include_bytes_aligned!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow"
+));
+
+/// Resolves the eBPF object in this order: the `AYAFLOW_EBPF_OBJECT` path if
+/// set, then the object embedded at build time (release builds), then the
+/// local build tree (development builds).
+fn load_ebpf_object() -> anyhow::Result<Cow<'static, [u8]>> {
+    if let Some(path) = std::env::var_os("AYAFLOW_EBPF_OBJECT") {
+        let path = PathBuf::from(path);
+        tracing::info!(
+            "Loading eBPF object from {} (AYAFLOW_EBPF_OBJECT)",
+            path.display()
+        );
+        return std::fs::read(&path)
+            .map(Cow::Owned)
+            .with_context(|| format!("failed to read eBPF object at {}", path.display()));
+    }
+
+    #[cfg(feature = "embed-ebpf")]
+    {
+        tracing::info!("Using embedded eBPF object");
+        Ok(Cow::Borrowed(EMBEDDED_EBPF))
+    }
+
+    #[cfg(not(feature = "embed-ebpf"))]
+    {
+        load_ebpf_object_from_build_tree().map(Cow::Owned)
+    }
+}
+
+#[cfg(not(feature = "embed-ebpf"))]
+fn load_ebpf_object_from_build_tree() -> anyhow::Result<Vec<u8>> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let candidates = [
+        manifest_dir.join("../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"),
+        manifest_dir.join("../ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow"),
+    ];
 
     for candidate in &candidates {
         if candidate.is_file() {
@@ -233,22 +273,9 @@ fn load_ebpf_object() -> anyhow::Result<Vec<u8>> {
         .join(", ");
 
     anyhow::bail!(
-        "could not find the compiled eBPF object. Searched: {}. Run `cargo xtask build-ebpf` or `cargo xtask build` first.",
+        "could not find the compiled eBPF object. Searched: {}. Run `cargo xtask build-ebpf` or `cargo xtask build` first, or set AYAFLOW_EBPF_OBJECT.",
         searched_paths
     );
-}
-
-fn ebpf_object_candidates() -> Vec<PathBuf> {
-    if let Some(path) = std::env::var_os("AYAFLOW_EBPF_OBJECT") {
-        return vec![PathBuf::from(path)];
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-    vec![
-        manifest_dir.join("../ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow"),
-        manifest_dir.join("../ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow"),
-    ]
 }
 
 fn init_logging(quiet: bool) {

@@ -42,9 +42,11 @@ FROM rust:1.85.1 AS builder
 WORKDIR /build
 COPY . .
 COPY --from=ebpf-builder /build/ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow \
-    /build/ayaflow-ebpf/target/bpfel-unknown-none/debug/ayaflow
+    /build/ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow
 
-RUN cargo build --release -p ayaflow
+# Embed the eBPF object so the binary runs standalone. The release workflow
+# extracts this binary as the downloadable release asset.
+RUN cargo build --release -p ayaflow --features embed-ebpf
 
 # Stage 3: Minimal runtime image.
 FROM debian:bookworm-slim
@@ -57,12 +59,6 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/ayaflow /usr/local/bin/ayaflow
-
-# The agent loads the eBPF object at runtime, so ship it in the image and point
-# the agent at it (otherwise it searches build-tree paths that don't exist here).
-COPY --from=ebpf-builder /build/ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow \
-    /usr/local/lib/ayaflow/ayaflow-ebpf.o
-ENV AYAFLOW_EBPF_OBJECT=/usr/local/lib/ayaflow/ayaflow-ebpf.o
 
 # The container runs as root on purpose. Attaching the eBPF TC classifier needs
 # the BPF, NET_ADMIN, and PERFMON capabilities, granted at `docker run` time via

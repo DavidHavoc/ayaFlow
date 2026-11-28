@@ -77,3 +77,8 @@ jobs:
 
       - name: Build full Linux pipeline
         run: cargo xtask build
+
+      - name: Check release build with embedded eBPF object
+        run: |
+          cargo xtask build-ebpf --release
+          cargo clippy -p ayaflow --release --features embed-ebpf -- -D warnings
