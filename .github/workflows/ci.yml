@@ -49,6 +49,8 @@ jobs:
 
       - name: Set up stable Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Set up nightly Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -81,4 +83,4 @@ jobs:
       - name: Check release build with embedded eBPF object
         run: |
           cargo xtask build-ebpf --release
-          cargo clippy -p ayaflow --release --features embed-ebpf -- -D warnings
+          cargo +stable clippy -p ayaflow --release --features embed-ebpf -- -D warnings
