@@ -49,17 +49,38 @@ jobs:
 
       - name: Set up stable Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Set up nightly Rust
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
 
+      # bpf-linker >= 0.13 no longer builds via `cargo install` without a
+      # system LLVM, so use the pinned upstream prebuilt binary (same version
+      # and checksum as the Dockerfile).
       - name: Install bpf-linker
-        run: cargo +nightly install bpf-linker
+        env:
+          BPF_LINKER_VERSION: v0.13.0
+          BPF_LINKER_SHA256: 0e9b2b30f68898177f1cb6f0ecbfa909a82479473a49a0ef66529fd088e3e410
+        run: |
+          tarball=bpf-linker-x86_64-unknown-linux-musl.tar.zst
+          curl -fsSLo "$RUNNER_TEMP/$tarball" \
+            "https://github.com/aya-rs/bpf-linker/releases/download/${BPF_LINKER_VERSION}/${tarball}"
+          echo "$BPF_LINKER_SHA256  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar --zstd -xf "$RUNNER_TEMP/$tarball" -C "$HOME/.local/bin" bpf-linker
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/bpf-linker" --version
 
       - name: Build userspace
         run: cargo xtask build-user
 
       - name: Build full Linux pipeline
         run: cargo xtask build
+
+      - name: Check release build with embedded eBPF object
+        run: |
+          cargo xtask build-ebpf --release
+          cargo +stable clippy -p ayaflow --release --features embed-ebpf -- -D warnings
