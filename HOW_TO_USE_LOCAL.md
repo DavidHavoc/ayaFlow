@@ -29,7 +29,7 @@ cargo xtask build-user
 |---|---|
 | OS | Linux kernel >= 5.8 with BTF support |
 | Toolchains | Stable Rust plus nightly |
-| eBPF linker | `cargo +nightly install bpf-linker` |
+| eBPF linker | `bpf-linker`, installed with `cargo binstall bpf-linker` |
 | Privileges | root, or `CAP_BPF`, `CAP_NET_ADMIN`, and `CAP_PERFMON` |
 
 Verify BTF support:
@@ -43,10 +43,13 @@ ls /sys/kernel/btf/vmlinux
 ```bash
 rustup install nightly
 rustup component add rust-src --toolchain nightly
-cargo +nightly install bpf-linker
+cargo install cargo-binstall
+cargo binstall bpf-linker
 
 cargo xtask build
 ```
+
+`cargo binstall` downloads the prebuilt `bpf-linker` binary. Building it with `cargo install bpf-linker` needs a system LLVM (`llvm-config` on `PATH`) and fails without one. See the [bpf-linker install guide](https://github.com/aya-rs/bpf-linker#installation) for other options.
 
 ### Run
 
