@@ -184,7 +184,7 @@ pub async fn run() -> anyhow::Result<()> {
                 tracing::error!("Server error: {}", e);
             }
         }
-        _ = tokio::signal::ctrl_c() => {
+        _ = shutdown_signal() => {
             tracing::info!("Shutdown signal received, cleaning up...");
         }
     }
@@ -194,6 +194,25 @@ pub async fn run() -> anyhow::Result<()> {
     tracing::info!("TC filters detached from {}, shutdown complete", interface);
 
     Ok(())
+}
+
+/// Resolves on SIGINT (Ctrl-C) or SIGTERM (`docker stop`, Kubernetes pod
+/// termination), so the TC filters are detached on either.
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    match signal(SignalKind::terminate()) {
+        Ok(mut sigterm) => {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = sigterm.recv() => {}
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to install SIGTERM handler: {}", e);
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
 }
 
 fn load_ebpf_object() -> anyhow::Result<Vec<u8>> {

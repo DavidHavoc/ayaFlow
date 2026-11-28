@@ -58,6 +58,12 @@ RUN apt-get update && \
 
 COPY --from=builder /build/target/release/ayaflow /usr/local/bin/ayaflow
 
+# The agent loads the eBPF object at runtime, so ship it in the image and point
+# the agent at it (otherwise it searches build-tree paths that don't exist here).
+COPY --from=ebpf-builder /build/ayaflow-ebpf/target/bpfel-unknown-none/release/ayaflow \
+    /usr/local/lib/ayaflow/ayaflow-ebpf.o
+ENV AYAFLOW_EBPF_OBJECT=/usr/local/lib/ayaflow/ayaflow-ebpf.o
+
 # The container runs as root on purpose. Attaching the eBPF TC classifier needs
 # the BPF, NET_ADMIN, and PERFMON capabilities, granted at `docker run` time via
 # `--privileged` or `--cap-add` (see HOW_TO_USE_DOCKER.md). A non-root USER
